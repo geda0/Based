@@ -7,7 +7,55 @@ logged with a one-line rationale. Acceptance criteria are layer-tagged and tied 
 the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Now (in flight)
-_None. LV1 RE-ACCEPTED on the browser-direct transport (below); M4 is next — see Next._
+
+### WDC · "Watchable demo cut" — real Twitch streams + "Start watching" gesture + light UI polish + graceful embeds — `[frontend]` — milestone: **navigator-prioritized (post-LV1, ahead of M4)** — priority: **NOW (navigator's call — "quickest watchable cut first")** — status: **in-progress (KICKOFF written; bullet 1 data swap in progress — navigator sourcing ids)**
+  - **KICKOFF: `design-notes.md` → WDC** (full layer-tagged acceptance; replaces the shipped LV1 KICKOFF). _(A prior
+    WDC attempt hit a transient error before the KICKOFF was written — this is the retry, same scope.)_
+  - **Why now (navigator's read of the deployed app):** LV1 shipped a working engine + a real live Gemini voice, but
+    the **deployed staging app reads as a dev scaffold** — FAKE `EXAMPLE_*` embeds show "offline"/404/crash, the UI
+    is bare ("idle" + a player + an unstyled rail), and there's a console flood (most loudly `"AudioContext was not
+    allowed to start"` — the feed/audio fire on mount with no user gesture). The navigator chose the **quickest
+    watchable cut** over M4. This advances the brief's §1 thesis — **"the product is the character... a product with
+    a face"** — by closing the smallest gap to "open the link, click once, and watch."
+  - **Re-prioritization rationale (PO):** placed **ahead of M4 at the navigator's explicit choosing.** M4 (digest +
+    real ranking) is still the one unmet brief DoD and is queued **immediately after** WDC, but a *watchable* demo is
+    worth more right now than a second behavior on an unwatchable scaffold — the experience gap (no real video, no
+    face, console flood) dominates the value gap. WDC is also tiny and low-risk: a **data swap + one gating gesture +
+    presentational polish + a degradation guard**, with the host loop / §6 contracts / cost-gating / live-voice
+    transport all **UNCHANGED**.
+  - **Scope — 4 tight moves (layer-tagged; full bullets in `design-notes.md`):**
+    1. **Real streams** `[frontend]` **[TDD]** (data guard) + **[qa/visual]** (it plays) — the §11 mock
+       (`frontend/src/mocks/event-graph.ts`) references **real reliably-live Twitch channels** via official
+       `player.twitch.tv` embeds (navigator-sourced 24/7 ids: rifftrax, 247jynxzi, caedrel247, lirik_247, jynxzi);
+       **no `EXAMPLE_*` survives** (a substring tripwire). Invariant #5 holds by construction (first-party embeds,
+       verbatim + ADR-0008 `parent`).
+    2. **"Start watching" gesture** `[frontend]` **[TDD]** — one click that UNBLOCKS the `AudioContext` (kills the
+       `"AudioContext was not allowed to start"` flood) AND starts the feed/host (host wakes **on the click**, not on
+       mount). Clean "▶ Start watching" state before; live experience after. **The cleanest first RED.**
+    3. **Light UI polish** `[frontend]` **[qa/visual]** (look) + **[TDD]** (idle/speaking stays legible) — the host
+       as a **visible presence** (idle vs speaking legible, not bare text), a real player+rail+host layout, a styled
+       rail (the spoiler-safe `type · streamer` labels). **NOT a redesign** — just "not a dev tool."
+    4. **Graceful embeds** `[frontend]` **[TDD]** (our code) + **[qa/visual]** — an offline/unavailable embed
+       degrades quietly in OUR app (no crash, no app-level flood; rail + manual surf keep working). Third-party
+       iframe logs are out of our control.
+  - **DoD:** navigator opens staging, clicks "▶ Start watching," sees **real video** + the host **wake, speak
+    (Gemini), cut** between streams — no broken player, no app crash/flood, looks like a product with a face;
+    `pnpm verify`=0; tdd-critic PASS; **qa-verifier confirms on the running app**; **PO sign-off**. (Full DoD +
+    [TDD]-vs-[qa/visual] split in `design-notes.md` → WDC DEFINITION OF DONE.)
+  - **First RED (suggested):** the **"Start watching" gesture** — _feed NOT started on mount + a clean start control
+    present_ (purely our code, deterministic with an injected feed, and it directly kills the AudioContext flood).
+  - **Invariants (re-ASSERTED, not re-proven — the host loop / §6 seam are UNCHANGED):** spoiler-safety (no new text;
+    rail still `type · streamer`, never `narrative`), silence budget + cost-gating (unchanged loop, merely gated
+    behind one click — can only reduce spend), **official-embeds-only (the load-bearing WDC invariant — first-party
+    `player.twitch.tv` verbatim + ADR-0008 `parent`, no rehost)**, secrets-from-env (untouched — pure FE).
+  - **Depends on:** LV1 ✓ (the shipped live-voice experience this makes watchable), M1 shell ✓, the navigator's
+    confirmed real channel ids (in progress) for bullet 1. UX-affecting → qa-verifier on green (required).
+  - **Out of scope (deferred follow-ups — see "Next"):** the "while you were gone" digest on load (**M4**, DoD #1);
+    deep visual design; the **dynamic "current top live channel" fetch** (robust always-live for a shared link —
+    static 24/7 ids can still go offline); real two-level ranking (**M4**); **Kick-platform variety** (a reliably-live
+    Kick/YouTube id — WDC may point non-Twitch vantages at a real Twitch id instead). **No new §13 escalation** —
+    rides on the settled persona/voice/rights defaults (the LV1 audible/voice-identity confirmation already pending
+    with the navigator covers the voice).
 
 ## Recently accepted — LV1 (this boundary)
 - **LV1 · Live-voice host** — **✅ RE-ACCEPTED on the BROWSER-DIRECT transport (2026-06-03, ADR 0007 Amendment C).**
@@ -144,11 +192,12 @@ _None. LV1 RE-ACCEPTED on the browser-direct transport (below); M4 is next — s
 
 ## Next (prioritized)
 
-### M4 · Two-level ranking + "while you were gone" digest — `[frontend]` — milestone: **M4** — priority: **NEXT (the milestone now in flight, post-LV1)** — status: **todo — UNBLOCKED (LV1 conditionally accepted)**
-  - **Why now:** LV1 is conditionally accepted, so M4 is the next milestone and the **one unmet brief DoD** —
-    **DoD #1** ("a useful digest of what you missed loads on entry; the channel is never empty even at 4am").
-    M4 is pure-FE, no new external dep — a clean next feature (this was always the fallback-first item, and is now
-    simply the next item). _(PO will write the M4 KICKOFF into `design-notes.md` when the orchestrator opens M4;
+### M4 · Two-level ranking + "while you were gone" digest — `[frontend]` — milestone: **M4** — priority: **NEXT (immediately after WDC)** — status: **todo — UNBLOCKED (LV1 shipped; queued behind WDC)**
+  - **Why next (after WDC):** LV1 is shipped; the navigator inserted **WDC** ("quickest watchable cut") ahead of M4,
+    so M4 is now the **next milestone after WDC** and remains the **one unmet brief DoD** — **DoD #1** ("a useful
+    digest of what you missed loads on entry; the channel is never empty even at 4am"). M4 is pure-FE, no new
+    external dep — a clean next feature. **It includes the WDC-deferred "digest on load"** (WDC explicitly does NOT
+    add the digest). _(PO will write the M4 KICKOFF into `design-notes.md` when the orchestrator opens M4;
     DESIGN: additive-on-existing-contracts ranking + a digest directive — confirm with the architect whether the
     digest needs any §6 shape change or fits the existing `HostDirective`/`RankedFeed`.)_
   - **Goal:** event rank → `RankedFeed` desc; vantage rank picks best lens; **digest on load** (DoD #1 — the
@@ -163,6 +212,30 @@ _None. LV1 RE-ACCEPTED on the browser-direct transport (below); M4 is next — s
     `eventScore`" is a doc-comment the ranker must **PROVE** with an ordering test (M1 used a placeholder
     `eventScore = heatDelta`).
   - **Depends on:** M0b contracts ✓, M1 shell ✓. UX-affecting → qa-verifier on green.
+
+### DYNAMIC-LIVE-FETCH · always-live channels via a platform "currently-live" query — `[frontend|backend]` — milestone: **post-WDC robustness** — priority: **medium (the robust fix behind WDC's static-id expedient)** — status: **todo — DEFERRED from WDC (filed at the WDC KICKOFF)**
+  - **Why:** WDC swaps in **static research-confirmed 24/7 Twitch ids** so the demo is watchable now — but a static id
+    **can still go offline**, so a *shared* staging link is not guaranteed live at an arbitrary moment (WDC's bullet 4
+    only degrades gracefully when that happens). The robust fix: **query a platform API for a currently-live channel**
+    (e.g. a Twitch "get streams" call, server-side so any key stays in env) and target the mock's vantages at a
+    genuinely-live id at load — so the link is **always live**, not just usually. _Out of WDC scope (WDC is the
+    quickest cut); promote when "shared link is always live" matters (e.g. an external demo)._
+  - **Goal:** the surfaced vantage is a channel that is **live right now**, fetched dynamically, not a static id.
+  - **Invariants:** official-embeds-only (still first-party embeds rendered verbatim); **secrets-from-env** if the
+    platform query needs a key (server-side, env-only — re-prove on the new path); cost-gating (one cheap query at
+    load, not a poll firehose). **Confirm at DESIGN:** which platform API, whether a key is needed, where the query
+    runs (a thin backend proxy mirrors M3's `/narrate` if a key is involved).
+  - **Depends on:** WDC ✓ (the static-id watchable cut it hardens). Likely seam-touching if it adds a backend query →
+    architect confirms + ADR if so. UX-affecting → qa-verifier on green.
+
+### KICK-VARIETY · a reliably-live Kick (or YouTube) 24/7 id for embed-platform diversity — `[frontend]` (data/curation) — milestone: **post-WDC demo-prep** — priority: **low (demo-prep / variety)** — status: **todo — DEFERRED from WDC (filed at the WDC KICKOFF)**
+  - **Why:** WDC may point the non-Twitch (Kick/YouTube) vantages at a **real Twitch id** rather than block on
+    sourcing a reliably-live Kick id (Kick's `EXAMPLE_JC` is the known crash/404 source). Restoring genuine
+    **embed-platform variety** (a live Kick or YouTube channel) — so the demo shows the multi-platform surf the brief
+    describes (§1: "Twitch, YouTube, Kick, TikTok") — is a deferred content/curation call. **Pure data** once a
+    confirmed-embeddable, ToS-compliant, reliably-live id is found. Official embeds only (the settled Rights/ToS
+    invariant). _Out of WDC scope (don't block the watchable cut on sourcing a live Kick id)._
+  - **Depends on:** WDC ✓. Pure data + the §13 Rights/ToS posture (already settled: official embeds only).
 
 ### DOC-RECONCILE · align ADR 0007 / design-notes / backlog to topology (a) browser-direct — `[docs]` (architect) — priority: **low (housekeeping, non-blocking)** — status: **todo (filed at the LV1 browser-direct re-accept)**
   - **Why:** the code is now topology (a) browser-direct (ADR 0007 Amendment C — relay RETIRED, ECS CANCELLED), but

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { App } from "../src/App.js";
 import { events } from "../src/mocks/event-graph";
 
@@ -8,6 +8,16 @@ describe("App", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  // WDC: the feed/host is gated behind a user gesture. Every test that advances
+  // fake time to drive the feed must first click "Start watching", or no event
+  // will ever surface under the new contract.
+  const startWatching = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /start watching/i }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  };
 
   it("mounts the channel-surf shell from the mock event-graph, showing a channel and the top event's best vantage", () => {
     // Derive expectations from the mock so this stays honest if the sample changes.
@@ -43,6 +53,68 @@ describe("App", () => {
     expect(src).toContain("parent=localhost");
   });
 
+  it("does not start the feed or wake the host until the 'Start watching' gesture is clicked", async () => {
+    // WDC: the host must NOT wake on mount. Starting the feed in a mount effect
+    // wakes the host with no user gesture (wrong UX) AND creates the AudioContext
+    // pre-gesture, so the browser blocks the host's audio. The feed must start —
+    // and the host may wake — ONLY after a "Start watching" click.
+    vi.useFakeTimers();
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves a known non-empty line so a surface yields a
+    // real speak directive (the narrating-host-loop drops blank narrations).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // A counting VoiceNarrator: each speak() bumps the count. A never-resolving
+    // promise is fine — this test pins WHEN the App voices, not drain.
+    let speakCount = 0;
+    const voice = {
+      speak: () => {
+        speakCount += 1;
+        return new Promise<void>(() => {});
+      },
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // Load-bearing: advance fake time PAST the first mock event (ts:1) WITHOUT
+    // clicking. The feed is gated, so nothing surfaces: the host stays idle and
+    // the voice is never asked to speak. (This proves the feed is GATED, not just
+    // "not yet fired".)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/idle/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent(/speaking/i);
+    expect(speakCount).toBe(0);
+
+    // The gesture exists: a "Start watching" control names the affordance.
+    expect(
+      screen.getByRole("button", { name: /start watching/i }),
+    ).toBeInTheDocument();
+
+    // Click it — now the feed starts. Advance past the first mock event (ts:1):
+    // the host wakes and the line is voiced.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /start watching/i }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+    expect(speakCount).toBeGreaterThanOrEqual(1);
+  });
+
   it("routes the surfacing event through the injected narrate client and wakes the host into the speaking state", async () => {
     // The host loop's speak side-effect defaults to window.speechSynthesis, which
     // jsdom lacks — stub the Web Speech surface so the character can speak without
@@ -69,6 +141,7 @@ describe("App", () => {
     };
 
     render(<App narrate={narrate} />);
+    await startWatching();
 
     // The first mock event (heatDelta 0.91) clears the default surfaceThreshold and
     // fires at ts: 1. Advance fake time past it; the async narrate resolves within
@@ -117,6 +190,7 @@ describe("App", () => {
 
     // No narrate prop → the real default createNarrateClient() (the buggy path).
     render(<App />);
+    await startWatching();
 
     // Advance ~3s of feed time across several flush turns. Only the first mock
     // event (ts: 1, heatDelta 0.91) surfaces in this window — events 2/3 fire at
@@ -170,6 +244,7 @@ describe("App", () => {
     };
 
     render(<App narrate={narrate} voice={voice} />);
+    await startWatching();
 
     // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at
     // ts: 1; advance past it so the surfacing directive drives the voicing path.
@@ -213,6 +288,7 @@ describe("App", () => {
     };
 
     render(<App narrate={narrate} voice={voice} />);
+    await startWatching();
 
     // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at
     // ts: 1; advance past it so the surfacing directive drives the voicing path.
@@ -270,6 +346,7 @@ describe("App", () => {
     };
 
     render(<App narrate={narrate} voice={voice} />);
+    await startWatching();
 
     // First surface: mock event 1 (ts: 1, heatDelta 0.91) clears surfaceThreshold
     // and fires; voice.speak() #1 is called and its resolver pushed (kept PENDING).
@@ -337,6 +414,7 @@ describe("App", () => {
     };
 
     render(<App narrate={narrate} voice={voice} />);
+    await startWatching();
 
     // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at ts: 1;
     // advance ~100ms so the surfacing directive drives the voicing path.
@@ -410,7 +488,9 @@ describe("App", () => {
     // must not have voiced the idle firehose — zero on startup.
     expect(speakCount).toBe(0);
 
-    // Let the first mock event (ts:1, heatDelta 0.91 ≥ surfaceThreshold) surface.
+    // Start watching, then let the first mock event (ts:1, heatDelta 0.91 ≥
+    // surfaceThreshold) surface.
+    await startWatching();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });

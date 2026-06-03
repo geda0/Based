@@ -98,8 +98,14 @@ echo "    frontend bucket: $BUCKET"
 echo "    cloudfront:      $CF_URL ($DIST_ID)"
 echo "    backend:         $BE_URL"
 
-step "4/5  Build frontend (VITE_API_BASE_URL=$BE_URL) + sync to S3"
-VITE_API_BASE_URL="$BE_URL" pnpm --filter @app/frontend build
+# VITE_LIVE_VOICE=1 turns on the LV1 live-voice path (browser-direct Gemini Live
+# audio) in the STAGING bundle. The FE defaults it OFF so tests/dev keep Web Speech;
+# staging opts in. It is a NON-SECRET build flag (the long-lived GEMINI_API_KEY stays
+# server-side in SSM; the browser mints only a short-lived ephemeral token via
+# POST /live/session). NO VITE_LIVE_RELAY_URL — the relay was retired (ADR 0007
+# Amendment C, topology a: browser opens Google's Live WSS directly).
+step "4/5  Build frontend (VITE_API_BASE_URL=$BE_URL, VITE_LIVE_VOICE=1) + sync to S3"
+VITE_API_BASE_URL="$BE_URL" VITE_LIVE_VOICE=1 pnpm --filter @app/frontend build
 aws s3 sync frontend/dist "s3://$BUCKET/" --delete --region "$REGION"
 
 step "5/5  Invalidate CloudFront cache"

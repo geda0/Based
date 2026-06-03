@@ -16,5 +16,9 @@ function embedSrc(embedUrl: string): string {
 }
 
 export function Player(props: { vantage: Vantage }): JSX.Element {
-  return <iframe title="player" src={embedSrc(props.vantage.embedUrl)} />;
+  return (
+    <div className="player-wrapper">
+      <iframe title="player" src={embedSrc(props.vantage.embedUrl)} />
+    </div>
+  );
 }

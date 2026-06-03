@@ -36,6 +36,7 @@ const liveVoice: VoiceNarrator = createLiveNarrator({
 export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }): JSX.Element {
   const [speakDirective, setSpeakDirective] = useState<HostDirective>();
   const [cutDirective, setCutDirective] = useState<HostDirective>();
+  const [started, setStarted] = useState(false);
   const narrate = props?.narrate ?? defaultNarrate;
   const voice = props?.voice ?? (import.meta.env.VITE_LIVE_VOICE ? liveVoice : defaultVoice);
 
@@ -58,17 +59,36 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
       })();
     });
     const sourceFeed = createSourceGraphFeed(events, bus);
-    sourceFeed.start();
+    if (started) {
+      sourceFeed.start();
+    }
     return () => {
       sourceFeed.stop();
       unsubscribe();
     };
-  }, [narrate, voice]);
+  }, [narrate, voice, started]);
 
   return (
-    <main>
-      <Character directive={speakDirective} />
-      <ChannelSurfShell feed={feed} directive={cutDirective} />
-    </main>
+    <div className="app-shell">
+      <header className="app-header">
+        <span className="app-wordmark">Based</span>
+        <span className="app-tagline">Your AI host for live discovery</span>
+      </header>
+      <main className="app-stage">
+        <ChannelSurfShell
+          feed={feed}
+          directive={cutDirective}
+          hostPresence={<Character directive={speakDirective} />}
+          cta={
+            !started ? (
+              <div className="cta-overlay">
+                <p className="cta-tagline">Your AI host is ready — press play</p>
+                <button className="cta-btn" onClick={() => setStarted(true)}>▶ Start watching</button>
+              </div>
+            ) : null
+          }
+        />
+      </main>
+    </div>
   );
 }

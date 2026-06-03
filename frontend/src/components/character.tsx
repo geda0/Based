@@ -24,8 +24,20 @@ export function Character(props: {
   }, [directive, speak, speakingMs]); // per speak directive: speaks once, arms one revert
 
   return (
-    <div role="status" aria-label={speaking ? 'host speaking' : 'host idle'}>
-      {speaking ? 'speaking' : 'idle'}
+    <div
+      className="character-root"
+      data-state={speaking ? 'speaking' : 'idle'}
+      role="status"
+      aria-label={speaking ? 'host speaking' : 'host idle'}
+    >
+      <div className="host-orb" aria-hidden="true" />
+      <div className="host-meta">
+        <span className="host-name">Based Host</span>
+        <span className="host-status-text">{speaking ? 'speaking' : 'idle'}</span>
+        {speaking && directive?.utterance && (
+          <p className="host-caption">{directive.utterance}</p>
+        )}
+      </div>
     </div>
   );
 }
