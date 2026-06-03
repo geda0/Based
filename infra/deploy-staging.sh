@@ -20,9 +20,12 @@ step "Deploying Based staging  |  account $ACCOUNT  |  region $REGION  |  tag $I
 
 # Gemini key -> SSM SecureString. Sourced from backend/.env (gitignored) or the
 # environment; the value is never printed or passed to CloudFormation (only its ARN is).
+# GEMINI_MODEL (non-secret) is single-sourced from the version-controlled IaC default in
+# infra/staging.yaml: we only pass a parameter-override when backend/.env (or the env)
+# actually provides one (local override). CI has no backend/.env, so it gets the IaC
+# default — no hardcoded model id in this script to drift. See ADR 0005.
 SSM_NAME="/based/staging/gemini-api-key"
 if [ -f backend/.env ]; then set -a; . ./backend/.env; set +a; fi
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.1-flash}"
 step "0/5  Gemini API key -> SSM SecureString ($SSM_NAME)"
 if [ -n "${GEMINI_API_KEY:-}" ]; then
   aws ssm put-parameter --name "$SSM_NAME" --type SecureString --value "$GEMINI_API_KEY" --overwrite --region "$REGION" >/dev/null
@@ -34,7 +37,16 @@ else
   exit 1
 fi
 GEMINI_SSM_ARN="$(aws ssm get-parameter --name "$SSM_NAME" --region "$REGION" --query 'Parameter.ARN' --output text)"
-echo "    arn: $GEMINI_SSM_ARN   model: $GEMINI_MODEL"
+echo "    arn: $GEMINI_SSM_ARN"
+
+# Single-source GEMINI_MODEL: override the IaC default only if backend/.env / env set it.
+MODEL_OVERRIDE=()
+if [ -n "${GEMINI_MODEL:-}" ]; then
+  MODEL_OVERRIDE=("GeminiModel=$GEMINI_MODEL")
+  echo "    model: $GEMINI_MODEL  (override from backend/.env or env)"
+else
+  echo "    model: <IaC default from infra/staging.yaml>  (no GEMINI_MODEL in env/backend/.env)"
+fi
 
 step "1/5  ECR repository (CloudFormation: $ECR_STACK)"
 aws cloudformation deploy \
@@ -61,7 +73,7 @@ step "3/5  Infrastructure stack (CloudFormation: $MAIN_STACK) — CloudFront + A
 aws cloudformation deploy \
   --stack-name "$MAIN_STACK" \
   --template-file infra/staging.yaml \
-  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "GeminiModel=$GEMINI_MODEL" \
+  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "${MODEL_OVERRIDE[@]+"${MODEL_OVERRIDE[@]}"}" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \
   --no-fail-on-empty-changeset

@@ -3,10 +3,14 @@ import { render, screen } from "@testing-library/react";
 import { ChannelRail } from "../src/components/channel-rail";
 import type { PerceptionEvent, RankedFeed } from "../src/contracts";
 
-function makeEvent(eventId: string, narrative: string): PerceptionEvent {
+function makeEvent(
+  eventId: string,
+  narrative: string,
+  opts: { type?: PerceptionEvent["type"]; streamer?: string } = {},
+): PerceptionEvent {
   return {
     eventId,
-    type: "clutch",
+    type: opts.type ?? "clutch",
     narrative,
     heatDelta: 0.5,
     novelty: 0.5,
@@ -20,6 +24,7 @@ function makeEvent(eventId: string, narrative: string): PerceptionEvent {
         embedUrl: "https://player.twitch.tv/?channel=example",
         offsetSec: 0,
         lensScore: 0.5,
+        ...(opts.streamer === undefined ? {} : { streamer: opts.streamer }),
       },
     ],
     ts: 0,
@@ -27,14 +32,32 @@ function makeEvent(eventId: string, narrative: string): PerceptionEvent {
 }
 
 describe("ChannelRail", () => {
-  it("lists one channel per event in events order, each showing its narrative", () => {
-    // Two events with distinct, recognizable narratives, in eventScore-desc order.
+  it("labels each channel with the spoiler-safe `type · streamer`, never the outcome-bearing narrative", () => {
+    // ADR 0009 — the rail is a viewer-facing surface, so its label must come from SAFE
+    // fields (`event.type` + the top vantage's `streamer`), never the outcome-bearing
+    // `narrative`. The first event's narrative deliberately names an outcome ("to win the
+    // round") so we can prove that token never reaches the rendered label.
     const feed: RankedFeed = {
       events: [
-        { ...makeEvent("alpha", "Falcons pull off the impossible reverse sweep"), eventScore: 0.92 },
-        { ...makeEvent("bravo", "Speedrunner shaves four seconds off the world record"), eventScore: 0.41 },
+        {
+          ...makeEvent("alpha", "1v3 retake clutch to win the round in the major semifinal", {
+            type: "clutch",
+            streamer: "Co-streamer A",
+          }),
+          eventScore: 0.92,
+        },
+        {
+          ...makeEvent("bravo", "Speedrunner shaves four seconds off the world record", {
+            type: "reveal",
+            streamer: "Original runner",
+          }),
+          eventScore: 0.41,
+        },
       ],
     };
+
+    // The spoiler-safe label each channel should show, in feed order.
+    const expectedLabels = ["clutch · Co-streamer A", "reveal · Original runner"];
 
     render(<ChannelRail feed={feed} />);
 
@@ -42,15 +65,22 @@ describe("ChannelRail", () => {
     const channels = screen.getAllByRole("listitem");
     expect(channels).toHaveLength(feed.events.length);
 
-    // Each event's narrative is visible to the user.
-    for (const event of feed.events) {
-      expect(screen.getByText(event.narrative)).toBeInTheDocument();
+    // Each channel shows its spoiler-safe `type · streamer` label, in feed order, and the
+    // label names a surfable control (its accessible name is the new label).
+    const renderedLabels = channels.map((channel) => channel.textContent ?? "");
+    for (const [index, expected] of expectedLabels.entries()) {
+      expect(renderedLabels[index]).toContain(expected);
+      expect(screen.getByRole("button", { name: expected })).toBeInTheDocument();
     }
 
-    // The narratives appear in the same order as feed.events.
-    const renderedNarratives = channels.map((channel) => channel.textContent);
-    for (const [index, event] of feed.events.entries()) {
-      expect(renderedNarratives[index]).toContain(event.narrative);
+    // No channel renders the raw, outcome-bearing narrative.
+    for (const event of feed.events) {
+      expect(screen.queryByText(event.narrative)).not.toBeInTheDocument();
+    }
+
+    // No rendered label leaks the banned outcome token from the first event's narrative.
+    for (const label of renderedLabels) {
+      expect(label).not.toMatch(/win the round/i);
     }
   });
 

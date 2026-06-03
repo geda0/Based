@@ -9,11 +9,19 @@ seam-touching → **architect consult REQUIRED at DESIGN** before the first RED.
 `design-notes.md` (M3-scoped) + `backlog.md`. Scope/invariants: ADR 0003/0004.
 
 ## Status
-- **Milestone:** **M3 — qa blockers FIXED; ready for re-qa → PO accept → RELEASE `m3`.** Build + length-cap done; narration quality confirmed live (DoD #4 ✓); the 3 qa defects D1/D2/D3 are **fixed + unit-covered**.
-- **Layer:** frontend
-- **Phase:** — (feature boundary; **re-qa** next → PO sign-off → release)
+- **Milestone:** **LV1 · live-voice host — DESIGN done** (ADR `0007-live-voice-seam`). Replaces M3's text+Web-Speech with `gemini-3.1-flash-live-preview` over the **Live WSS API** (native streamed audio; resolves §13 voice identity). Architect chose **(a) ephemeral-token + browser-direct WSS** (new `POST /live-token` mints a short-lived scoped token — long-lived key never in the browser); fallback **(b)** backend WSS relay. **§6 contracts + host loop UNCHANGED** — `speak()` generalizes to async `VoiceNarrator`; a `live-narrator` owns the audio session behind the existing injectable seam. M0–M3 released (`m2`,`m3`).
+- **Layer:** — (between DESIGN and BUILD; BUILD starts **backend** at `red` after the gate + PO KICKOFF)
+- **Phase:** — (feature boundary)
 - **Suite:** green — `pnpm verify`=0 (backend 7/7, frontend 24/24, e2e skipped).
-- **Blocker:** none. ✅ D1 fixed → no more storm, `pnpm dev` is safe again. §13 tier-hedging + spoiler-across-surfaces still open (pre-external-demo only). **NEXT MILESTONE queued (navigator-chosen):** live-voice host — `gemini-3.1-flash-live-preview` (WSS + native streaming audio, replaces Web Speech; resolves §13 voice identity).
+- **Blocker (LV1 topology GATE):** confirm whether `gemini-3.1-flash-live-preview` supports **ephemeral tokens** + the Live WSS endpoint/audio-format (ADR 0007 flagged these for BUILD). **Yes → topology (a); No → fallback (b)** backend relay (re-sequence per ADR). Needs a research/validation step (or navigator confirmation, since they own the Gemini account) before the first RED.
+- ⚠ **CI deploy gap (still open):** `deploy-staging.sh` reads `GEMINI_MODEL` from gitignored `backend/.env` → CI ships the fallback. Sync `GEMINI_MODEL` to SSM **before LV1's release** (LV1 changes the model id again).
+
+## Staging demo-quality follow-ups — from the navigator's staging screenshot
+- ✅ **EMBED-TWITCH-PARENT — FIXED (local, green):** Player appends `parent=<window.location.hostname>` only for `player.twitch.tv` (ADR 0008; ADR 0003 #5 amended — required platform params allowed, still no rehost). Real Twitch ids will now render.
+- ✅ **SPOILER-HARDENING — FIXED (local, green):** rail label = `` `${type} · ${streamer}` `` via the shared `topVantage` (extracted to `frontend/src/lib/top-vantage.ts`), never the outcome-bearing narrative (ADR 0009 — **resolves §13 spoiler-across-surfaces**). No rail label leaks an outcome. (25 FE tests; `pnpm verify`=0.)
+- **PLACEHOLDER-EMBEDS (demo-prep, open):** real Twitch/Kick channel ids (`EXAMPLE_*` are fake) — a content call at demo time (§13 Rights/ToS). With the parent fix, real Twitch ids now render.
+- ⚠ **EMBED FIXES NOT YET DEPLOYED (local + uncommitted):** a push auto-triggers CI → `deploy-staging.sh` → re-ships the WRONG `GEMINI_MODEL` (the CI gap) → would regress M3 narration on staging. So **fix the CI `GEMINI_MODEL`→SSM gap BEFORE pushing/deploying** (or do a manual deploy). The fixes can ride with LV1's release (which needs the CI fix anyway) or a dedicated patch.
+- §13 remaining (pre-external-demo): **tier-hedging** wording. Voice identity → resolving via LV1.
 
 ## qa defects — M3 (ALL FIXED ✅ + unit-covered; re-qa pending)
 _D1 ✅ stable module-level narrate client → no storm (regression test on the DEFAULT-client path: 1 call). D2 ✅ `dev` = `tsx watch --env-file=.env …` (env loads). D3 ✅ empty/whitespace utterance → no-speak (`narrating-host-loop.ts`). 24 FE + 7 BE tests, `pnpm verify`=0. Original detail below._
@@ -47,16 +55,13 @@ _D1 ✅ stable module-level narrate client → no storm (regression test on the 
   rail-spoiler defect → see Open follow-ups.
 - **Harness fix:** vite glob `*.test.{ts,tsx}` (logic tests `.ts`, component tests `.tsx`).
 
-## Next — M3 · ACCEPT + RELEASE
-**Build DONE + critic PASS** (backend 4 cycles: valid→line · 400-no-spend · secrets-from-env · spoiler/tier-prompt;
-FE 4: cost-gating · utterance-from-API · failure-silent · App-wiring). 28 tests (BE 6 / FE 22), `pnpm verify`=0.
-New modules: `backend/src/modules/narrate/{routes,schema,gemini-client,prompt}`, `frontend/src/lib/{narrate-client,narrating-host-loop}`, App narrates via injectable client. ADR 0006 (spoiler claim reconciled — prompt is the control).
-Remaining to ACCEPT + ship:
-1. **Docs:** ADR 0006 reconciled ✓ (architect). PO to fix design-notes §10 spoiler wording + tick the M3 FE bullets/checklist at accept.
-2. **qa-verifier** — drive the LIVE wake→speak→cut; confirm the line is **LLM-generated** (DoD #4) + spoiler-safe + failure-degrades-to-silence. ⚠ This makes a **REAL Gemini call** (FE→`/narrate`→Gemini w/ env key). Needs the exact **Gemini model id/endpoint confirmed** — `gemini-3.1-flash` is wired; if the id/endpoint is off the call fails → host silent → no live line (so confirm against Google docs first, or qa reports "silent: model call failed"). Run `pnpm dev` (FE+BE) locally.
-3. **PO accept** — triage critic follow-ups (#2 length-bound: cap+test or strike; #3 topVantage dedup→POLISH; #4 seam tripwire) + sign off M3 vs acceptance + DoD #4.
-4. **RELEASE m3** (PM + dev-ops): commit + annotated tag `m3` + push + deploy to staging + verify health → `releases.md`. Runs **in parallel with M4** per the PM cadence.
-§13 now live-relevant: **tier-hedging** wording (shapes the generated line — needed before external demo) + **spoiler-across-surfaces/rail** (still open). Neither blocks accept.
+## Next — LV1 · live-voice host (or M4)   ← M0–M3 done + released (`m3`)
+PO sequenced **LV1 (live-voice host)** ahead of M4. LV1 is **seam-touching → architect DESIGN required FIRST** (before any RED):
+1. **DESIGN — architect:** the WSS Live API topology for `gemini-3.1-flash-live-preview` — crucially **how the key stays server-side over a WebSocket** (server proxy vs ephemeral token; the browser must NEVER hold the raw key) + the audio pipeline replacing `speak()`. Record an ADR; re-prove **secrets-from-env over WSS**. Then PO refreshes `design-notes.md` into the LV1 KICKOFF.
+2. **BUILD** (backend-first WSS proxy/session → FE audio) via the inner loop → tdd-critic → qa (audible voice + spoiler-safe) → PO accept → **RELEASE lv1**.
+**Fallback-first:** if Live-audio proves heavy, do **M4** first (two-level ranking + "while you were gone" digest — pure-FE, no new external dep; M4 delivers **DoD #1**, the one unmet DoD item), then LV1.
+⚠ **Before any model-id-changing release (LV1):** fix the CI deploy gap — sync `GEMINI_MODEL` to SSM (see Status / `releases.md`) or CI will ship the hardcoded fallback again.
+§13 still open (pre-external-demo only): tier-hedging wording; spoiler-across-surfaces (rail).
 
 ## Open follow-ups (in backlog)
 - **SPOILER-HARDENING (high):** the channel rail renders outcome-bearing `narrative` verbatim

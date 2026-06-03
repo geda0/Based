@@ -82,37 +82,49 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
     endpoint + audio frame format, and Google's guidance on **server-side key handling for browser clients**
     (proxy vs ephemeral token) — against Google's docs (ADR 0003 note); wire model id via env, don't hardcode.
 
-### M3 follow-ups — carried open (none gate the M3 release; address opportunistically / at M4)
+### Staging demo-quality / embed follow-ups — surfaced by the navigator's staging screenshot (2026-06-02, https://d253xma588uo3l.cloudfront.net)
 
-- **SPOILER-HARDENING · rail labels must not leak outcomes** — `[frontend]` — priority: **high** — status: todo
-  - **Defect (qa-verifier, during M2 accept).** The channel rail (`frontend/src/components/channel-rail.tsx:9`)
-    renders each event's `narrative` **verbatim** as the button label, and the §11 mock narratives **name
-    outcomes** ("1v3 retake clutch **to win the round**", "Speedrunner … **for a world record**"). So while
-    the *host's utterance* is spoiler-safe (M2 proven), the **rail leaks the same outcomes on screen** — the
-    foreknowledge is meant only to *time the cut*, never to leak (brief §5, §14). Spoiler-safe in the ear,
-    spoiler on the page.
-  - **Scope note.** This is **pre-existing M1-accepted** behavior (the rail rendered `narrative` since M1) and
-    sits **outside M2's literal DoD #5**, which scopes "no spoiler" to the **host**. So it did **not** block M2
-    accept. But it contradicts the spoiler-safety **spirit** (the moat is pro-creator / anti-spoiler — "the
-    opposite of a product-killer"), so it is filed high and **re-opens an M1 design choice** → escalated to the
-    navigator (see "Decisions needed: spoiler-safety across surfaces").
-  - Goal: the rail labels describe **where to look** in the host's anticipation register **without revealing the
-    outcome** — consistent with the host's voice across every surface.
-  - Acceptance (sketch — finalize after the navigator call):
-    - `[frontend]` The rail label is a **spoiler-safe** string derived from safe fields (recommend `type` +
-      `streamer`, e.g. "Valorant clutch — Co-streamer A", "World-record attempt — Original runner") — it does
-      **not** render the raw `narrative`, and does **not** contain the event's outcome token.
-    - `[frontend]` Given the §11 mock, when the rail renders, then **no** label contains a banned outcome token
-      (e.g. "to win the round", "world record") — assert on the rendered labels.
-    - `[frontend]` Manual surf still works (label change is cosmetic; `onSelect(eventId)` unchanged).
-  - Depends on: navigator decision (how strictly spoiler-safety applies across surfaces; couples to tier-aware
-    hedging). **Recommended default:** hedge the rail now (don't wait) — derive the label from `type`+`streamer`.
+_Filed for team awareness from a live STAGING screenshot. **None block LV1** (LV1 proceeds in parallel — it
+swaps the narration transport/voice, not the embed path). The structure works on staging: app runs, host shows
+**"idle"** (correct default), the rail renders the 3 mock channels with heat bars, the player area mounts.
+The two **demo-blockers** the navigator prioritized ("fix embeds first") — EMBED-TWITCH-PARENT (embed playback
+fails) and SPOILER-HARDENING (on-screen spoiler leak) — are now **FIXED (local, green)** → moved to **Done**.
+**⚠ Both are local-only — NOT yet committed/deployed; they MUST NOT be pushed until the CI `GEMINI_MODEL`→SSM
+gap is fixed (see "Deploy dependency" below), since a push auto-triggers CI which would regress M3's live
+narration on staging.** The remainder below is coordinated demo-prep. Severity/ownership noted per item. PO
+will not pick these ahead of LV1 unless the navigator re-prioritizes for a demo date._
+
+- **⚠ DEPLOY DEPENDENCY (blocks shipping the two fixes — record + surface to navigator).** EMBED-TWITCH-PARENT
+  and SPOILER-HARDENING are **fixed locally and green** (`pnpm verify`=0, 25 FE tests) but **NOT committed or
+  deployed**. **They must NOT be pushed yet:** a push **auto-triggers CI**, and CI currently re-ships the wrong
+  `GEMINI_MODEL` (the **open CI `GEMINI_MODEL`→SSM gap**), which would **regress M3's live narration on staging**.
+  So these embed/spoiler fixes should **ride with the LV1 release** (LV1 needs the CI fix anyway) **or a dedicated
+  patch deployed only AFTER the CI `GEMINI_MODEL`→SSM gap is fixed**. **Sequencing:** CI fix → then ship these +
+  LV1. Until then they stay local. (Orchestrator: surface to navigator + dev-ops; this is a release-gate, not a
+  PO feature gate.)
+
+- **PLACEHOLDER-EMBEDS · swap `EXAMPLE_*` placeholders for real, confirmed-embeddable channel ids** — `[frontend]` (data/curation) — priority: medium (demo-prep) — status: todo — _**UNBLOCKED by EMBED-TWITCH-PARENT** (now that the Player appends `&parent=<host>`, real Twitch ids will actually render) — remaining gate is the §13 Rights/ToS content call_
+  - **Known issue, reconfirmed on staging.** The §11 mock uses `EXAMPLE_*` placeholder channel ids that aren't
+    real streams, so embeds blank-render / 404 (expected since M1 — see Rights/ToS in Decisions needed). The
+    staging screenshot shows this concretely: `GET kick.com/api/v2/channels/EXAMPLE_JC/playback-url 404` +
+    Kick's own internal "Playback URL not found" error (Kick's player is a third-party React-Router app — **that
+    error is from the THIRD-PARTY embed, not our SPA**), from `frontend/src/mocks/event-graph.ts:70`
+    (`player.kick.com/EXAMPLE_JC`). The Twitch `EXAMPLE_A`/`EXAMPLE_RUN` channels are likewise fake.
+  - **Now purely a content/curation call.** EMBED-TWITCH-PARENT (✓ Done) means the Player now appends the required
+    `&parent=<host>`, so a **real Twitch channel will render**. The only remaining work is picking real,
+    confirmed-embeddable, ToS-compliant ids — a **content/curation call, not a code change**. Resolve the §13
+    Rights/ToS gate (official embeds only) and swap the `EXAMPLE_*` mock ids.
+  - Goal (demo-time): the rail's channels render **live** official embeds end to end (real id + the Twitch
+    `parent` now appended), proving the channel-surf mechanic on actual streams.
+  - Depends on: §13 Rights/ToS decision (real ids). **EMBED-TWITCH-PARENT no longer a dependency — it's Done.**
+    Pure data once the Rights/ToS gate is decided.
+
 - **POLISH · critic nits (M1 + M2 + M3)** — `[frontend|backend]` — priority: low — status: todo
   - Non-blocking tdd-critic nits; do opportunistically (e.g. alongside M4 work). No product impact.
     The M3 #3 (vantage dedup) + #4 (seam tripwire) nits are folded in here (last two entries).
-    - **(M1)** Drop the redundant `aria-valuenow` on the heat `<meter>` (`channel-rail.tsx:11`) — the `<meter>`
-      already exposes its value natively. _(Note: this file is also touched by the SPOILER-HARDENING item above —
-      sequence so they don't collide.)_
+    - **(M1)** Drop the redundant `aria-valuenow` on the heat `<meter>` (`channel-rail.tsx`) — the `<meter>`
+      already exposes its value natively. _(Note: `channel-rail.tsx` was just edited by SPOILER-HARDENING — the
+      label now uses `topVantage`'s `streamer`; re-confirm the current line for the `<meter>` before editing.)_
     - **(M1)** Give the click→switch test its own independent `max lensScore` guard (today it leans on the load
       test's shared `topVantage`).
     - **(M2-a)** Delete the stale **compiled `.js` test artifacts** in `frontend/tests/` (`*.test.js`, `setup.js`)
@@ -122,12 +134,13 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
     - **(M2-b)** Fix the cosmetic React `act()` warning in `App.test.tsx`'s wake test; also that test's no-`act`
       timing coupling is a bit fragile — make its timing assertion robust (it shouldn't depend on incidental
       scheduling).
-    - **(M2-c / M3 · tdd-critic #3)** `topVantage` (max-`lensScore` vantage selection) is now **triplicated**
-      across `channel-surf-shell.tsx:6` (the `topVantage` fn), `host-loop.ts:32` (inline `reduce`), **and**
-      M3's `narrating-host-loop.ts` (the third copy). Extract **one** shared helper into `frontend/src/lib`
-      and have all three call it (single source of truth for "best vantage"). _(M3 added the third site, so
-      the dedup payoff grew; still low-priority/no-product-impact — do opportunistically, ideally folded into
-      the #4 seam-tripwire pass or M4 ranking work which also touches vantage selection.)_
+    - **(M2-c / M3 · tdd-critic #3) — PARTIALLY DONE.** `topVantage` (max-`lensScore` vantage selection) has now
+      been **extracted to the shared helper `frontend/src/lib/top-vantage.ts`** (done as part of SPOILER-HARDENING,
+      which needed the safe `streamer` field — the rail now calls it). **Remaining trim:** confirm/migrate the
+      other copies onto the shared helper — `host-loop.ts` (inline `reduce`) and M3's `narrating-host-loop.ts`
+      **may still hold local copies**; verify and trim so `lib/top-vantage.ts` is the single source of truth.
+      _(Low-priority/no-product-impact — do opportunistically, ideally folded into the #4 seam-tripwire pass or
+      M4 ranking work which also touches vantage selection.)_
     - **(M3 · tdd-critic #4 — seam tripwire, low)** Add **one** cheap backend test that feeds a
       `NarrateInput`-shaped object (the FE client's request type) through `narrateRequestSchema.safeParse`
       and asserts it passes — a tripwire against FE↔BE seam drift (the two restatements of the §10 safe-input
@@ -148,6 +161,30 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
   - Goal: poll one platform API for a crude real `heatDelta`; inject one real event.
 
 ## Done
+- **EMBED-TWITCH-PARENT · Twitch embeds get the required `&parent=<host>`** ✓ (PO-accepted 2026-06-02 ·
+  architect-designed · TDD'd) — **demo-blocker resolved (local).** The Player now appends Twitch's required
+  `parent=<window.location.hostname>` **only** for `player.twitch.tv` URLs (so it's environment-correct at
+  runtime — CloudFront host on staging, `localhost` on dev — and Twitch no longer `[NoParent]`-fails);
+  **non-Twitch (YouTube/Kick) URLs stay byte-for-byte verbatim.** Resolves the §5 "render `embedUrl` verbatim"
+  invariant call: the architect ruled the mandated `parent` is **legitimate embed configuration, not rehosting**
+  — **ADR 0003 #5 was AMENDED** to allow required platform params while keeping no-rehost; topology recorded in
+  **ADR 0008** (Player-appends, single place). **official-embeds-only re-proven with tests:** Twitch-gets-parent
+  + non-Twitch-verbatim (player + App). With this fix, **real Twitch channel ids now render** → unblocks
+  PLACEHOLDER-EMBEDS down to a pure content/Rights-ToS call. **⚠ LOCAL ONLY — not committed/deployed; see Deploy
+  dependency above (must wait for the CI `GEMINI_MODEL`→SSM fix; rides with LV1 or a post-CI patch).** ADRs: 0008
+  (parent topology), 0003 #5 (amended).
+- **SPOILER-HARDENING · rail labels no longer leak outcomes** ✓ (PO-accepted 2026-06-02 · architect-designed ·
+  TDD'd) — **demo-blocker resolved (local); the confirmed on-screen staging leak is fixed.** The channel-rail
+  label is now the **spoiler-safe** `` `${event.type} · ${streamer}` `` (streamer from the shared `topVantage`
+  helper — **newly extracted to `frontend/src/lib/top-vantage.ts`**; falls back to `${type}` if no streamer) and
+  **NEVER renders the outcome-bearing `narrative`**. So the host's anti-spoiler voice now holds **across surfaces**,
+  not just in the ear — closing the gap where the rail plainly showed "…to win the round" / "…world record" to any
+  viewer. **spoiler-safety re-proven with tests** (rail + shell-surf + App migrated): asserts the new label, that
+  no raw `narrative` renders, and that **no banned outcome token** appears on screen. This **resolves the §13
+  "spoiler-across-surfaces" decision** (bind the no-spoiler rule to the whole UI, not just the host — see Decisions
+  needed, now RESOLVED) — recorded in **ADR 0009**. **⚠ LOCAL ONLY — not committed/deployed; see Deploy dependency
+  above.** ADR: 0009 (spoiler-across-surfaces). _Note: this also partially completes the POLISH `topVantage` dedup
+  (helper extracted; other call-sites still to trim — see POLISH M2-c/M3 #3)._
 - **M3 · Real Gemini narration (`POST /narrate` proxy + FE swap)** ✓ (PO-accepted 2026-06-02) —
   **satisfies brief DoD #4** ("host lines are LLM-generated live, not hardcoded"): M2's canned utterance
   is replaced by a real, persona-voiced, spoiler-safe, tier-hedged line from Gemini (`gemini-3.1-flash-lite`)
@@ -208,12 +245,14 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Decisions needed (PO → human navigator)  [brief §13]
 _Status (post-M3, LV1 in flight): **M3 is Done** (shipped on the §10 prompt + recommended hedging
-default; model stubbed in the suite). Two §13 calls remain **OPEN but non-blocking** — **tier-aware
-hedging** + **spoiler-across-surfaces** — both still needed only **before a generated line / the rail
-is shown externally** (they shape wording, not seams). **Voice identity is NOW ACTIVE:** LV1 (live-voice
-host) is the milestone that resolves it — the navigator chose the Gemini Live streamed-audio direction,
-so it moves out of "settled-for-now/external-demo gate" (see below). **Persona / rights** stay
-settled-for-now on the M2 defaults (re-attach at the first external demo) — kept for visibility._
+default; model stubbed in the suite). **spoiler-across-surfaces is now RESOLVED** (rail hedged via
+SPOILER-HARDENING; ADR 0009 — local + green, deploy-gated below). **One §13 wording call remains OPEN but
+non-blocking — tier-aware hedging** — needed only **before a generated line is shown externally** (shapes
+wording, not a seam). **Voice identity is RESOLVING via LV1:** the navigator chose the Gemini Live
+streamed-audio direction, so it moves out of "settled-for-now/external-demo gate" (see below). **Persona /
+rights** stay settled-for-now on the M2 defaults (re-attach at the first external demo) — kept for visibility.
+**Release note:** the two staging demo-blocker fixes (EMBED-TWITCH-PARENT, SPOILER-HARDENING) are **local +
+green but deploy-gated on the CI `GEMINI_MODEL`→SSM fix** — see "Deploy dependency" in the embed follow-ups._
 
 - **Tier-aware hedging — how hard to hedge confidence tiers 2–4** (esp. IRL/breaking: highest
   spoiler + misinformation risk). **OPEN (shipped in M3 on the default; non-blocking).** _Recommend:_
@@ -221,15 +260,16 @@ settled-for-now on the M2 defaults (re-attach at the first external demo) — ke
   → explicitly *unconfirmed* (per §10/§14). M3 built the proxy + invariant tests on this default with the
   model stubbed, so the exact hedging copy is tunable without reshaping the seam; LV1 inherits the same
   prompt + default. **Needed by:** showing a generated line externally (the wording is brand- and
-  misinformation-sensitive). Couples to the rail-labels call below. [pending]
+  misinformation-sensitive). _The coupled rail-labels call (spoiler-across-surfaces) is now RESOLVED (ADR
+  0009); this hedging wording is the last open §13 wording call._ [pending]
 - **Spoiler-safety across surfaces — does the host's no-spoiler rule bind the WHOLE UI, or only the
-  host's voice?** **NEW — re-opens an M1-accepted choice.** The rail renders raw `narrative`, which
-  names outcomes; the host is spoiler-safe but the page is not. _Recommend:_ bind it **everywhere** —
-  hedge the rail too (derive labels from `type`+`streamer`, the host's anticipation register), because
-  the moat is being **pro-creator / anti-spoiler** and a visible outcome is "the opposite of a
-  product-killer" (brief §5, §14). **Blocks M3? NO** (separate, high-priority "SPOILER-HARDENING"
-  item). **Needed by:** any external demo where viewers see the rail; resolve **together with
-  tier-aware hedging** (same anti-spoiler / hedging instinct, same wording sensitivity). [pending]
+  host's voice?** **✅ RESOLVED (2026-06-02) — bind it EVERYWHERE.** The recommended default was taken:
+  the rail no longer renders the raw outcome-bearing `narrative`; its label is the spoiler-safe
+  `` `${type} · ${streamer}` `` (host's anticipation register). Shipped via the **SPOILER-HARDENING** item
+  (now Done; spoiler-safety re-proven with tests across rail + shell-surf + App) and recorded in **ADR 0009**.
+  Rationale held: the moat is **pro-creator / anti-spoiler** — a visible outcome is "the opposite of a
+  product-killer" (brief §5, §14). _(⚠ The fix is local + green but not yet deployed — see Deploy dependency.)_
+  **Tier-aware hedging (the coupled wording call) remains OPEN** — see above. [RESOLVED · ADR 0009]
 - **Persona — one named host vs per-channel skins.** _Recommend: ONE named persona_ (stronger brand,
   merch/clip engine — brief §13). **SETTLED-FOR-NOW:** M2 shipped a single `idle`/`speaking` character
   on the one-host default; carries no rework risk into M3. **Re-attaches at:** the first external demo
@@ -245,4 +285,9 @@ settled-for-now on the M2 defaults (re-attach at the first external demo) — ke
   **SETTLED-FOR-NOW:** invariant carries through M2 (cuts render `embedUrl` verbatim) and is unchanged
   by M3 (`/narrate` never touches embeds). The §11 mock's `EXAMPLE_*` placeholders keep proving the
   mechanic structurally. **Re-attaches at:** the first external demo (pick real, confirmed-embeddable
-  channel ids — a content/curation call, no code change). [pending — external-demo gate]
+  channel ids — a content/curation call, no code change). **Staging update (2026-06-02):** the
+  **EMBED-TWITCH-PARENT** defect is now **FIXED** (Player appends `&parent=<host>`; ADR 0008, **ADR 0003 #5
+  amended** to allow required platform params while keeping no-rehost — local + green, deploy-gated). So
+  picking real Twitch ids is **now sufficient** — they will render. This gate is therefore reduced to a pure
+  **content/curation Rights-ToS call** (real, confirmed-embeddable, ToS-compliant ids — official embeds only).
+  See **PLACEHOLDER-EMBEDS** in the embed follow-ups section. [pending — external-demo gate]

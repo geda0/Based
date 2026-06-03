@@ -18,16 +18,29 @@ describe("App", () => {
 
     render(<App />);
 
-    // A channel per mock event: the top event's narrative names a surfable button.
+    // A channel per mock event: the top event's spoiler-safe `type · streamer` label
+    // (ADR 0009) names a surfable button — NOT its outcome-bearing narrative. The mock
+    // top event is `clutch` with top-vantage streamer "Co-streamer A".
     expect(
-      screen.getByRole("button", { name: topEvent.narrative }),
+      screen.getByRole("button", { name: `${topEvent.type} · ${bestVantage.streamer}` }),
     ).toBeInTheDocument();
 
-    // The player loads showing the top event's max-lensScore vantage, verbatim.
-    expect(screen.getByTitle("player")).toHaveAttribute(
-      "src",
-      bestVantage.embedUrl,
-    );
+    // Spoiler-leak closed across the whole surface: no rail label on screen leaks a
+    // banned outcome token from the mock narratives ("…to win the round", "…world record").
+    expect(document.body).not.toHaveTextContent(/to win the round/i);
+    expect(document.body).not.toHaveTextContent(/world record/i);
+
+    // The player loads showing the top event's max-lensScore vantage. That vantage
+    // is a Twitch embed (player.twitch.tv), so the Player preserves the official
+    // source + channel and appends Twitch's mandated parent=<host> (ADR 0008).
+    // Derive the channel from the mock so this stays honest if the sample changes;
+    // jsdom's window.location.hostname defaults to "localhost".
+    const channel = new URL(bestVantage.embedUrl).searchParams.get("channel");
+    expect(channel).not.toBeNull();
+    const src = screen.getByTitle("player").getAttribute("src") ?? "";
+    expect(src).toContain("player.twitch.tv");
+    expect(src).toContain(`channel=${channel}`);
+    expect(src).toContain("parent=localhost");
   });
 
   it("routes the surfacing event through the injected narrate client and wakes the host into the speaking state", async () => {

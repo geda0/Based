@@ -68,12 +68,16 @@ describe("ChannelSurfShell", () => {
     const URL_A = "https://www.youtube.com/embed/ALPHA_TOP";
     const URL_B = "https://player.kick.com/BRAVO_TOP";
 
+    // Distinct streamers on each event's top vantage make the new spoiler-safe rail
+    // label (`type · streamer`, ADR 0009) unambiguous to click, since both events share
+    // the `clutch` type.
     const alphaTop: Vantage = {
       streamId: "alpha-top",
       platform: "youtube",
       embedUrl: URL_A,
       offsetSec: 0,
       lensScore: 0.95,
+      streamer: "Alpha caster",
     };
     const alphaSecondary: Vantage = {
       streamId: "alpha-secondary",
@@ -88,6 +92,7 @@ describe("ChannelSurfShell", () => {
       embedUrl: URL_B,
       offsetSec: 0,
       lensScore: 0.91,
+      streamer: "Bravo caster",
     };
     const bravoSecondary: Vantage = {
       streamId: "bravo-secondary",
@@ -120,12 +125,14 @@ describe("ChannelSurfShell", () => {
     const iframe = screen.getByTitle("player");
     expect(iframe).toHaveAttribute("src", URL_A);
 
-    // Surf to the second channel: the player must follow to Bravo's top vantage.
-    await user.click(screen.getByRole("button", { name: /Bravo/ }));
+    // Surf to the second channel by its spoiler-safe label (`clutch · Bravo caster`):
+    // the player must follow to Bravo's top vantage.
+    await user.click(screen.getByRole("button", { name: /Bravo caster/ }));
     expect(iframe).toHaveAttribute("src", URL_B);
 
-    // Surf back to the first channel: selection is the only thing that moves the player.
-    await user.click(screen.getByRole("button", { name: /Alpha/ }));
+    // Surf back to the first channel (`clutch · Alpha caster`): selection is the only
+    // thing that moves the player.
+    await user.click(screen.getByRole("button", { name: /Alpha caster/ }));
     expect(iframe).toHaveAttribute("src", URL_A);
   });
 
@@ -189,12 +196,15 @@ describe("ChannelSurfShell", () => {
     const ALPHA_TOP_URL = "https://www.youtube.com/embed/ALPHA_TOP";
     const CUT_TARGET_URL = "https://player.kick.com/BRAVO_CUT_TARGET";
 
+    // Distinct streamers on each event's top vantage make the spoiler-safe rail label
+    // (`type · streamer`, ADR 0009) unambiguous to click, since both events share `clutch`.
     const alphaTop: Vantage = {
       streamId: "alpha-top",
       platform: "youtube",
       embedUrl: ALPHA_TOP_URL,
       offsetSec: 0,
       lensScore: 0.95,
+      streamer: "Alpha caster",
     };
     const bravoTop: Vantage = {
       streamId: "bravo-top",
@@ -202,6 +212,7 @@ describe("ChannelSurfShell", () => {
       embedUrl: "https://player.twitch.tv/?channel=BRAVO_TOP",
       offsetSec: 0,
       lensScore: 0.82,
+      streamer: "Bravo caster",
     };
     const bravoCutTarget: Vantage = {
       streamId: "v_cut_target",
@@ -237,8 +248,9 @@ describe("ChannelSurfShell", () => {
     const iframe = screen.getByTitle("player");
     expect(iframe).toHaveAttribute("src", CUT_TARGET_URL);
 
-    // The user surfs to a DIFFERENT channel. The player must follow the user, not stay trapped.
-    await user.click(screen.getByRole("button", { name: /Alpha/ }));
+    // The user surfs to a DIFFERENT channel by its spoiler-safe label (`clutch · Alpha caster`).
+    // The player must follow the user, not stay trapped.
+    await user.click(screen.getByRole("button", { name: /Alpha caster/ }));
     expect(iframe).toHaveAttribute("src", ALPHA_TOP_URL);
   });
 });

@@ -13,8 +13,12 @@ Parameters:
     Description: ARN of the SSM SecureString holding GEMINI_API_KEY (created/updated by infra/deploy-staging.sh; never the key value itself).
   GeminiModel:
     Type: String
-    Default: gemini-3.1-flash
-    Description: Gemini model id used by the M3 narration proxy.
+    Default: gemini-3.1-flash-lite
+    Description: >
+      Gemini model id used by the M3 narration proxy. NON-SECRET. This version-controlled
+      default is the single source of truth: CI (no backend/.env) uses it as-is;
+      deploy-staging.sh only passes a parameter-override when backend/.env sets GEMINI_MODEL
+      (local override). See docs/decisions/0005-staging-deployment.md.
 
 Resources:
   # ---------- Frontend: private S3 + CloudFront (OAC) ----------
