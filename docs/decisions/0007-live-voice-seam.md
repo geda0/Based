@@ -3,7 +3,13 @@
 ## Status
 
 Accepted (prototype phase). **Topology gate RESOLVED → (b) backend WSS relay**
-(see Decision §1; ground-truth study below). Extends ADR 0003 (boundaries + Based
+(see Decision §1; ground-truth study below). **⚠ RE-OPENED by Amendment B
+(2026-06-03): a live-API probe found the header-justification for §1's relay is
+empirically wrong (the WSS authenticates via a `?access_token=` query param a browser
+CAN set, not an `Authorization` header) — Amendment B RECOMMENDS (a) browser-direct,
+gated on a browser-handshake check (B2), which would REVERSE Amendment A2's ECS infra.
+Read Amendment B before §1. Corrections to the mint/method/wire (B0) apply regardless
+of topology.** Extends ADR 0003 (boundaries + Based
 invariants), ADR 0004 (the §6 seam), ADR 0005 (staging topology), and ADR 0006
 (the `/narrate` seam M3 built). Gates **LV1 · Live-voice host** BUILD; the seam
 surface below is now stable enough for the first RED. Append-only. Resolves the §13
@@ -649,3 +655,251 @@ target moves.
   pings** (keepalive) so the relay session is not dropped mid-utterance. (Mirrors gvp's
   ECS/Fargate+ALB note; the App Runner 120 s timeout was one reason it cannot host the
   relay at all.) This is a deploy-config detail, not a seam change.
+
+## Amendment B — live-API probe corrections + topology RE-OPENED — 2026-06-03
+
+A **live end-to-end probe of the real `gemini-3.1-flash-live-preview` Live API** (the
+JS `@google/genai` SDK), run M3-style before wiring LV1's production edges,
+**VALIDATED the whole pipeline** — mint → WSS connect → `setup` → speak turn → **6
+audio frames `audio/pcm;rate=24000`** → `turnComplete` — and found **three wire-shape
+corrections** to §1–§8 / Amendment A1 above. Two are local wire fixes; **the third is
+load-bearing and re-opens the §1 topology decision**, because the empirical fact §1
+rested on (a "browser cannot attach the credential the WSS needs, so a relay is
+required") is **wrong**. This amendment is **append-only**: §1–§8 and Amendments A1/A2
+are **NOT rewritten**; where they now conflict with ground truth, **this section
+supersedes them** and the conflict is named inline. **What is UNCHANGED in every case:
+the §6 contracts (`frontend/src/contracts/`), the host loop + `narrating-host-loop`
+decision/cost-gate/failure-silent logic, the cut (`cutToVantage.embedUrl` verbatim),
+the cost-gating posture (open/close per surfacing `speak`), and the `VoiceNarrator`
+interface the App consumes (`speak(text): Promise<void>` + optional `stop()`).** This
+is still a transport swap behind that seam; only *which side opens the Google socket*
+is reconsidered.
+
+> **Ground truth (the pipeline WORKS).** A Node `ws` client: minted an ephemeral token
+> via `authTokens.create`, opened the upstream WSS authenticated by that token, sent
+> the `setup` frame then a fixed-line `clientContent` turn, and received 6 PCM frames
+> (`audio/pcm;rate=24000`) terminated by `turnComplete`. The corrections below are the
+> exact wire shapes that made it work.
+
+### B0. The three probe corrections (ground truth)
+
+**Correction 1 — AUTH MECHANISM (LOAD-BEARING — re-opens topology).** The Live WSS
+authenticates an ephemeral token via a **`?access_token=<token>` URL query parameter,
+NOT an `Authorization: Token <token>` request header.** The header approach **FAILED
+with WSS close `1008` "unregistered callers."** The `@google/genai` SDK itself attaches
+the token as `?access_token=…`.
+→ **This moots §1's entire load-bearing justification for the backend relay** — which
+was, verbatim (§1, §Decision-1, Alternatives): *"a browser cannot set the
+`Authorization` header the WSS requires, so a server-side relay must attach it."* But a
+browser's native `WebSocket` **can** set a URL query param
+(`new WebSocket('wss://…?access_token=<token>')`). The thing §1 said only a server can
+do is in fact done with a query param, which the browser sets natively. So **topology
+(a) browser-direct is viable in principle** (subject to the B2 browser-handshake gate),
+and the §1 close-`1011` evidence cited against (a) is **superseded**: the real failure
+was close `1008` from the *header* path, i.e. the gvp relay-default and the "browser
+variant fails 1011" claim §1 leaned on are **not reproduced** by this probe — the query
+param is the SDK's own working path.
+
+**Correction 2 — METHOD (applies regardless of topology).** For an **ephemeral token**
+the WSS method must be **`…BidiGenerateContentConstrained`** (the SDK switches to the
+`Constrained` variant for `auth_tokens/…` credentials). Plain `BidiGenerateContent`
+was **not validated** with the token.
+→ **Supersedes** §2's "plain `BidiGenerateContent` also works" and Amendment §2's
+endpoint constant. `backend/.../live-relay.ts` currently hardcodes the **plain**
+endpoint **and** the `Token` header — **both wrong**; whichever topology is chosen, the
+upstream URL becomes the `…Constrained` endpoint **with `?access_token=<ephemeral>`
+appended** and **no `Authorization` header**.
+
+**Correction 3 — MINT RESPONSE SHAPE (applies regardless of topology).** The JS SDK
+`client.authTokens.create({ config: { uses: 1, expireTime, newSessionExpireTime } })`
+returns an `AuthToken` with **ONLY `.name`** — the token value, an `auth_tokens/…`
+string — and **no `token` / `expiresAt` fields.**
+→ So `POST /live/session` must **map `authToken.name → token`** and **synthesize
+`expiresAt` itself** from the `expireTime` it passed into `create()` (the SDK does not
+echo it back). This is a fix to the **real mint adapter**, not the route's public
+shape: Amendment A1's `200` body — `{ token, model: "<bare id>", expiresAt:
+"<ISO-8601>" }` — is **UNCHANGED and still correct**; the route still returns exactly
+that. What changes is the **`MintFn` boundary** (`live-token-client.ts`): the real
+`@google/genai` adapter must do the `name→token` rename and the `expiresAt` synthesis
+**inside** the injected mint, because the SDK gives neither. (The scaffolded
+`MintFn`/`mintToken` already type the *output* as `{ token, expiresAt }`; that output
+contract stays — only the real adapter's mapping from the raw SDK `AuthToken` is now
+specified. The stubbed mint in the suite already returns `{ token, expiresAt }`, so the
+**hermetic tests are unaffected**.)
+
+### B1. Topology — RE-EVALUATED → **RECOMMEND (a) browser-direct** (gated on B2)
+
+With Correction 1, the only justification §1 gave for the relay is gone, so the two
+topologies must be re-weighed on their actual merits. **Recommendation: (a)
+browser-direct**, contingent on the **B2 browser-handshake validation gate** passing.
+
+**(a) browser-direct (RECOMMENDED, gate-pending).** `POST /live/session` mints the
+ephemeral token **server-side** (the long-lived `GEMINI_API_KEY` stays
+`process.env`-only — **secrets-from-env intact**); the browser opens
+**`wss://…GenerativeService.BidiGenerateContentConstrained?access_token=<ephemeral>`
+DIRECTLY**, **sends the `setup` frame ITSELF** (it owns the connection), then sends the
+`clientContent` line turn, and plays the streamed PCM. **No relay. No
+`@fastify/websocket` / `ws`. NO ECS Express Mode.** App Runner keeps only the **plain
+HTTP `POST /live/session` mint** (which it already serves fine — request/response,
+under the 120 s timeout). This **eliminates** the relay module (`live-relay.ts`, cycles
+8–10) and the entire Amendment A2 infra.
+
+**(b) backend relay (the current build / §1).** Browser → our WSS relay → Google WSS;
+the relay holds the token and sends `setup` server-side (un-tamperable). Costs: the
+relay code + `@fastify/websocket`/`ws` + a **persistent-WebSocket host** — concretely
+the navigator-approved **ECS Express Mode** service (**~$25–30/mo + ~½-day standup +
+the App-Runner-sunset migration debt**), because App Runner cannot host inbound WSS
+(Amendment A2).
+
+**Weighing them now that the header argument is void:**
+
+| | **(a) browser-direct** | **(b) relay (current)** |
+|---|---|---|
+| Secrets-from-env (long-lived key) | server-side only ✓ | server-side only ✓ |
+| Credential on the wire | short-lived single-use ~3-min ephemeral token transits the browser | ephemeral token also stays server-side |
+| Infra | **HTTP mint only — App Runner as-is, $0 new** | **ECS Express Mode (~$25–30/mo + standup + migration)** |
+| Code | **delete the relay module + WS deps** | relay + `@fastify/websocket`/`ws` |
+| App-Runner-sunset exposure | **sidestepped — no WS host needed** | forces the ECS migration now |
+| `setup` trust | FE sends `setup` (FE-owned, see risk) | relay sends `setup` (un-tamperable) |
+| Remaining unknown | **does a REAL browser `WebSocket` handshake succeed with `?access_token=` + `Constrained`? (B2 gate)** | none (relay path is the build) |
+
+**Secrets-from-env holds in BOTH** — the long-lived key never leaves the server in
+either; the **only** delta is the short-lived, single-use, ~3-min ephemeral token
+transiting the browser under (a). **That exact trade was already accepted in Amendment
+A1 (option B):** A1 chose to return the ephemeral token to the FE, explicitly recording
+"the short-lived, single-use, ~3-min ephemeral token transits the browser … strictly
+weaker than (A)/(C) … accepted for the prototype." Under topology (a) the token also
+reaches Google **directly** instead of via our relay, but it is the **same** token with
+the **same** blast radius (one expiring single-use session); **A1's accepted posture
+already covers it.** So (a) introduces **no new secrets exposure beyond what A1
+accepted** — it removes the relay, not a protection of the long-lived key.
+
+**Why (a) is recommended:** it is **dramatically simpler and cheaper** (no relay
+module, no WS server dep, **no ECS Express Mode spend or standup**) and it **sidesteps
+the App-Runner-sunset / ECS-migration problem entirely** (Amendment A2's whole
+open-question disappears — there is nothing that needs a persistent-socket host). The
+secrets trade is one A1 already made. The decisive contingency is purely empirical and
+small (B2).
+
+**The remaining UNKNOWN — does a REAL browser confirm the handshake?** The probe that
+proved Correction 1 ran in **Node (`ws`)**, which is permissive about handshake
+mechanics. gvp claimed a browser-direct variant "fails with close `1011`" — **but gvp
+may have hit that via the dead `Authorization`-header path or an unrelated cause**, and
+this probe reproduced **`1008` from the header**, not `1011`, and **success from the
+query param**. So the gvp `1011` claim is **unconfirmed for the query-param + Constrained
+path in a real browser.** This is the **one** thing that must be checked before
+committing to (a) — captured as the B2 gate. **If B2 fails, fall back to (b)** with no
+seam change to the FE-visible `VoiceNarrator` (the narrator's I/O edge — "open the
+Google WSS" vs "open our relay" — is internal to it; see B3).
+
+### B2. The browser-WSS validation gate (the gate on recommending (a))
+
+**Before committing to (a), run a qa/browser check** (qa-verifier, M3-style, a tiny
+throwaway page — NOT a suite test; the hermetic suite never opens a real socket):
+
+> In a **real browser** (Chrome + Safari), mint an ephemeral token via `POST
+> /live/session`, then
+> `new WebSocket('wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=<ephemeral>')`,
+> send the `setup` frame (the existing `buildLiveSetup(...)` output) then a fixed-line
+> `clientContent` turn, and confirm **PCM `serverContent` frames arrive and the socket
+> does NOT close `1011`/`1008`.**
+
+- **PASS (frames arrive, no abnormal close)** → **adopt (a)**; the gvp `1011` claim was
+  path-specific or stale; proceed to retire the relay (B3) and **reverse Amendment A2's
+  ECS infra** (B4).
+- **FAIL (browser blocks the query-param handshake or Google closes it)** → **keep
+  (b)**; record the browser-specific failure here (append-only) as the *real*
+  re-justification for the relay (replacing the now-void header argument), and keep
+  Amendment A2's ECS Express Mode. The FE-visible `VoiceNarrator` seam is identical
+  either way (B3).
+
+This gate is the **only** thing between this recommendation and a topology commit; it is
+cheap (~an hour) and removable-throwaway, exactly the M3-style live probe that produced
+these corrections.
+
+### B3. The seam delta (for whichever topology B2 selects)
+
+**UNCHANGED in both (a) and (b)** — and this is the point of the seam: the §6 contracts
+(`frontend/src/contracts/`), `host-loop.ts` / `narrating-host-loop.ts` (decision +
+cost-gate + failure-silent), the character/player, the cut (`cutToVantage.embedUrl`
+verbatim), the cost-gating posture (open/close per surfacing `speak`, §3), and the
+**`VoiceNarrator` interface the App consumes** (`speak(text): Promise<void>` + optional
+idempotent `stop()`). The injectable I/O edge inside the narrator stays an injectable
+I/O edge — the suite injects a fake socket either way and asserts on
+line-frame/audio-lifecycle/failure-silent wiring, never on a real socket.
+
+**Corrections 2 & 3 apply in BOTH topologies (do them regardless of B2):**
+- **Mint adapter (`live-token-client.ts`, the real `MintFn`):** call
+  `authTokens.create`, then **`token = authToken.name`** and **synthesize `expiresAt`**
+  from the `expireTime` passed in. The route (`live.routes.ts`) and its `200` shape
+  `{ token, model, expiresAt }` (A1) are **unchanged**. The stubbed mint + the
+  `POST /live/session` HTTP tests are **unaffected** (they already use
+  `{ token, expiresAt }`).
+- **Upstream endpoint constant (wherever the Google socket is opened):**
+  `…GenerativeService.BidiGenerateContentConstrained` **+ `?access_token=<ephemeral>`
+  query param**, **no `Authorization` header.** In `live-relay.ts` today this is the
+  plain endpoint + `Authorization: Token` header — **both must change** under (b); under
+  (a) the relay module is retired and this constant lives in the FE narrator's open-edge.
+
+**If B2 selects (a) browser-direct — the changes vs the current build:**
+1. **FE narrator now OPENS THE GOOGLE WSS DIRECTLY** with the minted ephemeral token.
+   The scaffolded `createLiveNarrator({ openRelay })` (`frontend/src/lib/live-narrator.ts`)
+   keeps its shape, but **`openRelay` becomes "open the Google Live WSS directly"**
+   (`wss://…Constrained?access_token=<token>`) — still the **injectable** open-socket
+   edge (rename to `openSocket`/`connect` at the implementer's discretion; the fake the
+   tests inject is identical). The narrator first obtains the token via `POST
+   /live/session` (same `VITE_API_BASE_URL` base), then opens the socket.
+2. **FE narrator NOW SENDS the `setup` frame ITSELF**, then the `clientContent` turn —
+   it owns the connection. **This reverses §2's "browser MUST NOT re-send setup" /
+   KICKOFF cycle-7's "FE never sends a `setup` frame".** The setup payload is the **same
+   `buildLiveSetup(...)` output** (it moves from a backend-only builder to one the FE
+   also uses, or the FE inlines the equivalent — implementer's call; the *shape* is
+   fixed by §2 as corrected: `responseModalities: ["AUDIO"]` exactly one, prefixed
+   model, no-spoiler `systemInstruction`). Spoiler-safety is **unaffected** — the spoken
+   line is still the already-safe `HostDirective.utterance` constrained to "speak only
+   these exact words"; the `systemInstruction` no-spoiler restatement is still
+   defense-in-depth, now asserted on the FE setup frame instead of the relay's.
+3. **The relay module is RETIRED** (`backend/src/modules/live/live-relay.ts`, cycles
+   8–10) — **delete it, or keep it as a documented, off-by-default fallback** for the
+   B2-FAIL path. `@fastify/websocket` / `ws` are **not added** to the backend. `POST
+   /live/session` (mint, with Corrections 2 & 3) is the **only** backend live surface.
+4. **Cost-gating is preserved structurally** — the FE opens the Google socket **only**
+   inside `speak(...)` (one per surfacing event, closed on turn-drain), exactly the §3
+   open/close-per-utterance rule, now applied to the direct socket. The KICKOFF
+   cost-gating cycle ("zero opens on idle, one per `speak`") is **unchanged** — it
+   asserts on the injected open-edge regardless of what that edge connects to.
+
+**If B2 selects (b) relay — the changes vs the current build (smaller):** keep the
+relay, but **fix `live-relay.ts`** for Corrections 1 & 2: upstream URL →
+`…Constrained?access_token=<token>`, **drop the `Authorization: Token` header.** The
+FE-visible seam (open a WS to our relay; FE sends only `clientContent`, relay sends
+`setup`) is **unchanged from §1/§7**; Amendment A2's ECS Express Mode **stays**.
+
+### B4. NAVIGATOR DECISION (flagged explicitly) — adopting (a) REVERSES Amendment A2's approved ECS infra
+
+**This is a §13-class scope/infra call for the navigator,** surfaced with this
+recommendation:
+
+- **Recommendation: adopt (a) browser-direct, gated on B2 passing.**
+- **Consequence if adopted: Amendment A2 is REVERSED.** The navigator-approved **ECS
+  Express Mode relay service is NOT needed** — there is no relay and no inbound WSS to
+  host, so **App Runner stays as-is** (plain HTTP `/narrate` + `/live/session` mint).
+  This **saves the ~$25–30/mo + the ½-day standup**, **and removes the
+  App-Runner-sunset / whole-backend-migration open question** (Amendment A2's deferred
+  RELEASE sub-question) **entirely** — there is simply nothing that requires a
+  persistent-socket host. The ALB-idle-timeout / WS-keepalive dev-ops gotcha (A2) also
+  disappears.
+- **What does NOT change either way:** the §6 contracts, the host loop, cost-gating, the
+  `VoiceNarrator` interface, secrets-from-env (long-lived key server-side), and the
+  spoiler-safe text path (`/narrate`). LV1's *product* outcome — the host audibly
+  voiced by Gemini Live — is identical under (a) or (b).
+- **Sequencing:** run **B2 first** (cheap browser probe). **B2 PASS → navigator
+  confirms (a), A2 reversed, relay cycles 8–10 retired (or kept as documented
+  fallback), infra spend cancelled.** **B2 FAIL → keep (b) + A2; record the browser
+  failure here as the relay's real re-justification.** Either outcome leaves the
+  hermetic suite and the FE seam untouched; Corrections 2 & 3 land regardless.
+
+> **design-notes pointer:** the LV1 KICKOFF's "RESOLVED (Amendment A2)" relay-hosting
+> line and cycle-7's "FE never sends setup" are now **conditional on the B2 gate** — see
+> ADR 0007 Amendment B. Corrections 2 (Constrained method) & 3 (mint `name→token` +
+> synthesize `expiresAt`) apply to the BUILD regardless of topology.

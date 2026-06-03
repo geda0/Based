@@ -265,8 +265,8 @@ LV1 emits narration over a new transport, so per CLAUDE.md the pair must re-prov
 - [x] M1  — channel-surf shell: player + rail, manual surf, official embeds only  *(frontend)*  · PO-accepted
 - [x] M2  — character silent↔active + TTS + cut + client host loop  *(frontend)*  · PO-accepted
 - [x] M3  — real Gemini narration: `/narrate` proxy + FE swap  *(backend → frontend)*  · PO-accepted 2026-06-02 — satisfies brief DoD #4
-- [ ] **LV1 — live-voice host: `gemini-3.1-flash-live-preview` over WSS (backend relay), native streaming audio (replaces Web Speech)  *(backend → frontend)*  ← IN FLIGHT · DESIGN done (ADR 0007) · this KICKOFF · staging-deploy infra-gated (navigator)**
-- [ ] M4  — two-level ranking + "while you were gone" digest  *(frontend)*  *(sequenced after LV1; fallback-first if LV1 audio proves heavy)*
+- [x] **LV1 — live-voice host: `gemini-3.1-flash-live-preview` over WSS (backend relay), native streaming audio (replaces Web Speech)  *(backend → frontend)*  · ✅ CONDITIONALLY PO-ACCEPTED 2026-06-03 (green bar + invariants + qa pipeline; AUDIBLE/voice-identity confirmation = navigator at demo; LV1-D1/LV2-D1/LV2-D2 closed) · staging-deploy infra-gated on ECS (RELEASE-phase, navigator)**
+- [ ] **M4  — two-level ranking + "while you were gone" digest (DoD #1 — the one unmet DoD)  *(frontend)*  ← NEXT (the milestone now in flight, post-LV1) · pure-FE, no new dep · PO to write the M4 KICKOFF**
 - [ ] E2E — one DoD journey  *(playwright)*
 - [ ] M5  — (stretch) thin real heat
 

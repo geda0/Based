@@ -6,7 +6,9 @@ export function Character(props: {
   speak?: (text: string) => void;
   speakingMs?: number;
 }): JSX.Element {
-  const { directive, speak, speakingMs = 4000 } = props;
+  // safety cap — the App's drain-coupled revert governs normal returns to idle;
+  // this only fires if speak() never settles (e.g. a hung voice transport).
+  const { directive, speak, speakingMs = 30000 } = props;
   // The directive instance we have already auto-reverted to idle. Speaking is
   // derived during render (so a fresh speak directive shows immediately, with no
   // extra flushed state update), then a timer marks this directive reverted so the

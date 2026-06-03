@@ -135,4 +135,287 @@ describe("App", () => {
     // driving this far higher (one call per render turn).
     expect(narrateCalls.length).toBeLessThanOrEqual(2);
   });
+
+  it("voices the /narrate-produced line through the injected VoiceNarrator, not Web Speech", async () => {
+    // LV1: the voicing transport moves off Web Speech onto the injected
+    // VoiceNarrator (native Gemini Live audio). The /narrate TEXT path is
+    // unchanged — it still produces the utterance; only the speak() sink changes.
+    vi.useFakeTimers();
+    // Keep the Web Speech stubs in case the App constructs a default voice that
+    // touches these globals at module load — this test injects `voice`, so the
+    // real voicing must NOT go through them.
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves the host's line (unchanged from M3).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // The injected VoiceNarrator records what it is asked to speak. Its speak()
+    // returns a never-resolving promise — this test pins only that the narrated
+    // line reaches the injected narrator, not the drain-coupled revert (next cycle).
+    const spoken: string[] = [];
+    const voice = {
+      speak: (t: string) => {
+        spoken.push(t);
+        return new Promise<void>(() => {});
+      },
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at
+    // ts: 1; advance past it so the surfacing directive drives the voicing path.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Load-bearing: the surfaced line was voiced through the injected
+    // VoiceNarrator (called once with the /narrate-produced utterance), proving
+    // Web Speech is no longer the voicing path.
+    expect(spoken).toEqual(["the Major just turned — watch this"]);
+  });
+
+  it("reverts the host to idle when the injected voice.speak promise drains, without waiting for the speakingMs timer", async () => {
+    // LV1 (ADR 0007 §4 — drain-coupled revert): "speaking" must reflect audio
+    // actually playing. The host stays speaking while voice.speak()'s promise is
+    // pending and falls quiet the moment it RESOLVES (the utterance's audio has
+    // drained) — NOT when the Character's internal speakingMs timer fires.
+    vi.useFakeTimers();
+    // Web Speech stubs kept only in case a default voice touches these globals at
+    // module load; this test injects `voice`, so the real drain comes from it.
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves the host's line (unchanged from M3).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // A controllable VoiceNarrator: speak() returns a pending promise whose
+    // resolver we capture, so the test drives exactly when the audio "drains".
+    let resolveSpeak: (() => void) | undefined;
+    const voice = {
+      speak: () => new Promise<void>((res) => { resolveSpeak = res; }),
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at
+    // ts: 1; advance past it so the surfacing directive drives the voicing path.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Precondition: voice.speak was called and its promise is still pending, so
+    // the host is mid-utterance — speaking.
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+
+    // Drain it: resolve the speak promise and flush a single 0ms tick. We do NOT
+    // advance to the 4000ms speakingMs window — the revert must come from the
+    // drain, not the Character's fallback timer.
+    await act(async () => {
+      resolveSpeak?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The audio drained → the host fell quiet on its own, well before speakingMs.
+    expect(screen.getByRole("status")).toHaveTextContent(/idle/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent(/speaking/i);
+  });
+
+  it("keeps the host speaking when an earlier utterance's drain settles after a later utterance has taken over", async () => {
+    // LV1 race (App.tsx:44-47 — drain-coupled revert dropped the directive-identity
+    // guard the old Character had at character.tsx:15). The App reverts to idle
+    // UNCONDITIONALLY when a voice.speak() promise settles. If an EARLIER
+    // utterance's audio drains LATE — after a LATER utterance is already speaking —
+    // the earlier `.then(idle)` must NOT clobber the later utterance: the drain
+    // revert belongs only to the utterance it came from.
+    vi.useFakeTimers();
+    // Web Speech stubs kept only in case a default voice touches these globals at
+    // module load; this test injects `voice`, so the real drain comes from it.
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves a non-empty line so each surface yields a real
+    // speak directive (the narrating-host-loop drops blank narrations).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // A controllable VoiceNarrator: each speak() captures its own resolver in call
+    // order, so the test drives exactly which utterance's audio "drains" and when.
+    const resolvers: Array<() => void> = [];
+    const voice = {
+      speak: () => new Promise<void>((res) => { resolvers.push(res); }),
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // First surface: mock event 1 (ts: 1, heatDelta 0.91) clears surfaceThreshold
+    // and fires; voice.speak() #1 is called and its resolver pushed (kept PENDING).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(resolvers.length).toBe(1);
+
+    // Second surface: mock event 2 (ts: 45000, heatDelta 0.78) clears both the
+    // surfaceThreshold (0.78 ≥ 0.6) and the 30s silence budget (45000 − 1 ≥ 30000),
+    // so a LATER speak directive fires and takes over. (Event 3 at ts 90000 has
+    // heatDelta 0.55 < 0.6, so it never surfaces — exactly two surfaces here.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(45000);
+    });
+    expect(resolvers.length).toBe(2);
+
+    // Precondition: the later utterance is active, so the host is speaking — and
+    // the earlier utterance's drain has NOT yet settled.
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+
+    // Trigger the race: the EARLIER utterance's audio drains late — settle only
+    // resolver #1 (the later one stays pending) and flush a single 0ms tick.
+    await act(async () => {
+      resolvers[0]?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The later utterance is still playing → the host must STAY speaking. Today the
+    // earlier `.then(idle)` clobbers it to idle (the dropped identity guard).
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent(/idle/i);
+  });
+
+  it("keeps the host speaking past the old 4s speakingMs mark while the voice.speak drain is still pending", async () => {
+    // LV2-D1 (qa-found, live browser): real Gemini lines run ~7s, but the Character's
+    // fixed speakingMs=4000 timer reverts the host to idle at exactly 4.00s — BEATING
+    // the drain-coupled revert (App reverts when voice.speak() RESOLVES). The host
+    // flips to "idle" while audio is still playing. ADR 0007 §4 intent: "speaking is
+    // gated on audio actually playing; reverts when speak() resolves" — the DRAIN must
+    // govern the revert; the timer is only a generous SAFETY CAP, not the primary signal.
+    vi.useFakeTimers();
+    // Web Speech stubs kept only in case a default voice touches these globals at
+    // module load; this test injects `voice`, so the real drain comes from it.
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves the host's line (unchanged from M3).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // A controllable VoiceNarrator: speak() returns a pending promise whose resolver
+    // we capture, so the test drives exactly when the audio "drains". Until we resolve
+    // it, the utterance is still playing — the host must stay speaking.
+    let resolveSpeak: (() => void) | undefined;
+    const voice = {
+      speak: () => new Promise<void>((res) => { resolveSpeak = res; }),
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // The first mock event (heatDelta 0.91) clears surfaceThreshold and fires at ts: 1;
+    // advance ~100ms so the surfacing directive drives the voicing path.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Precondition: voice.speak was called and its promise is still pending, so the
+    // host is mid-utterance — speaking.
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+
+    // Advance WELL past the old 4000ms speakingMs window WITHOUT resolving the drain.
+    // (6s > 4000ms; the second mock event is at ts 45000, so nothing else surfaces in
+    // this window.) The audio is still playing — only the drain may return it to idle.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+
+    // RED: today the Character's speakingMs=4000 timer already fired at ~4s and reverted
+    // the host to idle while the drain promise is still pending. The drain must govern —
+    // so the host must STILL be speaking at 6s.
+    expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent(/idle/i);
+
+    // Now drain it: resolve the speak promise and flush. The drain governs the revert,
+    // so the host falls quiet. (This half should pass both before and after the fix —
+    // it pins that the drain still returns the host to idle.)
+    await act(async () => {
+      resolveSpeak?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/idle/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent(/speaking/i);
+  });
+
+  it("voices zero times on idle/mount and exactly once per surfaced speak directive (cost-gating tripwire)", async () => {
+    // Cost-gating invariant at the App dispatch layer (project-invariants §3): the
+    // App must call voice.speak() ONLY when the loop surfaces a `speak` directive —
+    // never on mount/idle, never on the non-surfacing firehose. Proven below at the
+    // <App/> integration boundary, not just inside the loop/narrator units.
+    vi.useFakeTimers();
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // The /narrate client resolves a known non-empty line so a surface yields a real
+    // speak directive (the narrating-host-loop drops blank narrations).
+    const narrate = async () => "the Major just turned — watch this";
+
+    // A counting VoiceNarrator: each speak() bumps the count. A never-resolving
+    // promise is fine — this test pins only how MANY times the App voices, not drain.
+    let speakCount = 0;
+    const voice = {
+      speak: () => {
+        speakCount += 1;
+        return new Promise<void>(() => {});
+      },
+    };
+
+    render(<App narrate={narrate} voice={voice} />);
+
+    // Mount/idle: the mock feed schedules its first event at ts:1 via setTimeout,
+    // which has NOT fired yet (no timer advance). With nothing surfaced, the App
+    // must not have voiced the idle firehose — zero on startup.
+    expect(speakCount).toBe(0);
+
+    // Let the first mock event (ts:1, heatDelta 0.91 ≥ surfaceThreshold) surface.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // One surfaced speak directive ⇒ exactly one voice call — bounded per surface.
+    expect(speakCount).toBe(1);
+  });
 });

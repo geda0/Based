@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import type { LiveTokenClient } from "./live.routes.js";
 
 const DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview";
@@ -11,16 +12,41 @@ export type MintFn = (
   model: string,
 ) => Promise<{ token: string; expiresAt: string }>;
 
-// The default REAL mint: the untested I/O edge. NOT WIRED YET — the real
-// @google/genai authTokens.create call (ADR 0007 §7 / Amendment A1 "token-flow
-// option B") lands in a later LV1 cycle, together with the relay + FE + infra
-// that gate /live/session on in production. Tests always inject `mint`, so this
-// throwing default keeps the suite hermetic and never pulls @google/genai into
-// this cycle.
-const defaultMint: MintFn = async () => {
-  throw new Error(
-    "@google/genai live token mint not wired yet — install @google/genai + implement authTokens.create at release-prep",
-  );
+// The default REAL mint — the untested I/O edge (live-probe.ts validated the
+// exact SDK API against the real account). Mirrors live-probe.ts exactly:
+//   client.authTokens.create({ config: { uses, expireTime, newSessionExpireTime } })
+// The `model` param is part of the MintFn contract (used later in the setup frame
+// by the relay) but the mint itself does not pass it to authTokens.create.
+// ADR 0007 §7 / Amendment B.
+const defaultMint: MintFn = async (apiKey: string, model: string) => {
+  // `model` is part of the MintFn contract (used in the setup frame by the relay)
+  // but authTokens.create does not take a model — reference it harmlessly to satisfy lint.
+  void model;
+  const client = new GoogleGenAI({
+    apiKey,
+    httpOptions: { apiVersion: "v1alpha" },
+  });
+
+  const now = Date.now();
+  // ~10-min hard expiry — the token is unusable after this (ADR 0007 §reference).
+  const expireTime = new Date(now + 10 * 60_000).toISOString();
+  // ~3-min open-session window — the live session must start within this window.
+  const newSessionExpireTime = new Date(now + 3 * 60_000).toISOString();
+
+  const authToken = await client.authTokens.create({
+    config: { uses: 1, expireTime, newSessionExpireTime },
+  });
+
+  // The SDK returns only `.name` (the token value, starts with `auth_tokens/`).
+  // There is no `.token` or `.expiresAt` field on AuthToken — we supply both from
+  // what we passed in (Correction 3 from release-prep spec).
+  if (!authToken.name) {
+    throw new Error(
+      "@google/genai authTokens.create returned an AuthToken with no `name` — unexpected SDK shape",
+    );
+  }
+
+  return { token: authToken.name, expiresAt: expireTime };
 };
 
 export function createLiveTokenClient(deps?: { mint?: MintFn }): LiveTokenClient {

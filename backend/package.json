@@ -11,11 +11,15 @@
   },
   "dependencies": {
     "@fastify/cors": "^9",
+    "@fastify/websocket": "^8.3.1",
+    "@google/genai": "^2.7.0",
     "fastify": "^4.28.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"

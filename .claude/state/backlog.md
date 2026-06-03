@@ -7,18 +7,109 @@ logged with a one-line rationale. Acceptance criteria are layer-tagged and tied 
 the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Now (in flight)
-- **LV1 · Live-voice host** — **DESIGN done (ADR 0007, topology → (b) backend WSS relay); LV1 KICKOFF
-  written into `design-notes.md` (2026-06-02).** Status flips `todo → in-progress`. 12 unit-TDD bullets
-  (backend mint ×4, relay/setup ×3, frontend VoiceNarrator ×4, integration ×1) + 3 qa-only bullets; first
-  RED = the pure `buildLiveSetup(...)` setup-frame builder `[backend]`. **It is a transport swap behind the
-  existing speak path** — host loop, cost-gating, §6 contracts, and the `/narrate` text path are UNCHANGED.
-  **⚠ Staging deploy of LV1 is infra-gated** (relay needs a persistent-WebSocket host — escalated below); BUILD
-  proceeds against a local/stubbed relay regardless. _(Orchestrator note: the `m3` RELEASE — PM + dev-ops
-  commit/tag `m3` + deploy + verify health → `releases.md` — runs in parallel per the PM cadence; not a PO gate.)_
+_None. LV1 conditionally accepted (below); M4 is next — see Next._
+
+## Recently accepted — LV1 (this boundary)
+- **LV1 · Live-voice host** — **✅ CONDITIONALLY PO-ACCEPTED (2026-06-03).** **Status: `in-progress → accepted`
+  (conditional).** Native `gemini-3.1-flash-live-preview` audio over a backend WSS relay now voices the host,
+  replacing M2/M3's Web-Speech TTS — a transport swap behind the existing `speak` path (§6 contracts, host loop,
+  cost-gating, and the `/narrate` text path UNCHANGED, proven by the integration bullet).
+  - **Accepted against LV1 DoD (`design-notes.md` §LV1 DEFINITION OF DONE):**
+    1. **All 12 unit-TDD bullets GREEN** — `pnpm verify`=0 re-confirmed at accept (**backend 21, frontend 37**;
+       LV1 modules `live-setup`, `live-session`, `live-token-client`, `live-relay`, `live-narrator` all green).
+    2. **tdd-critic = PASS** (two rounds: backend-mint, then relay+FE+integration; every HIGH/MEDIUM item CLOSED —
+       route-secrets tripwire, model-override+env-leak, the drain-revert race + cost-gating tripwire).
+    3. **Based invariants re-proven on the NEW transport, with tests** — **secrets-from-env** at BOTH client
+       (`createLiveTokenClient`: env-only, no-spend-without-key, body-key-ignored, key-never-echoed) AND route
+       (bogus body key ignored, long-lived key never in response/log, model-id from env); **cost-gating** (zero
+       opens idle / one per `speak`, open/close per utterance) + the integration call-count tripwire (zero on idle /
+       one per surface); **failure-silent** (relay/session failure → `speak` rejects → host stays idle, cut kept);
+       **spoiler-safety by construction** (narrator speaks `HostDirective.utterance` VERBATIM, no generation; relay
+       `setup` carries the persona + no-spoiler systemInstruction as defense-in-depth; `responseModalities` exactly
+       `["AUDIO"]`).
+    4. **qa-verifier — 2 of 3 qa-only bullets fully PASS; the 3rd's pipeline proven, audibility deferred to the
+       navigator's ear (see condition).** qa drove the running local stack TWICE against the REAL Gemini Live API.
+       PASS: **cut to vantage with NO on-screen spoiler before the cut** (DoD #5 on the audio path); **spoken line ==
+       on-screen spoiler-safe utterance** (verbatim, no leaked outcome); **silence budget holds** (one utterance per
+       surface; AUDIO-only; failure-silent). For the 3rd ("host is **AUDIBLY** voiced by Gemini Live") qa proved the
+       **pipeline executes end-to-end** — 37 PCM frames decoded → `audio.play()` → scheduled on a 24 kHz AudioContext
+       → `speak()` resolves on drain → per-utterance WS closes — and that the line is spoiler-safe, but **whether it
+       SOUNDS audible / intelligible / like the right host is a human-ear judgment** (escalated, below).
+    5. **No regression to M3** — `/narrate` text path, cost-gating, secrets-from-env, §6 contracts unchanged
+       (integration bullet proves the loop/contract did not reshape; `host-loop` + `narrating-host-loop` untouched).
+    6. **PO sign-off** — this entry.
+  - **Live-validation strength (beyond the hermetic suite):** a live probe (`backend/scripts/`, throwaway) proved
+    mint→WSS→setup→speak→PCM→turnComplete against the real account and **caught + fixed 3 ADR-0007 wire corrections**
+    (auth via `?access_token=` query param not the `Authorization: Token` header; the `…Constrained` method; mint
+    `name`→`token` + synthesized `expiresAt`) **and** a `@fastify/websocket` v8 registration bug — none of which the
+    hermetic suite could see. qa then re-verified end-to-end on the running stack.
+  - **⚠ ACCEPTANCE CONDITION (the one thing no agent can close):** _final **audible** confirmation is the
+    navigator's at demo_ — does the streamed Gemini Live voice **sound** audible, intelligible, and like the host we
+    want? This is the §13 **voice-identity** call (engine was chosen; the specific voice/persona-audio is the human's
+    ear). **Escalated below.** If the navigator finds the audio inaudible/wrong-voice at demo, re-open LV1 with a
+    defect (voice/output-audio config — a tuning knob, NOT a seam change).
+  - **Closed defects (all FIXED + re-verified):**
+    - **✅ LV1-D1 (was BLOCKER) — CLOSED.** Real-browser binary frames arrived as `Blob` → narrator's string-only
+      branch dropped them → no audio, `speak()` never resolved, WS leaked. **Fix:** relay socket `binaryType='arraybuffer'`
+      + narrator decodes `ArrayBuffer` frames (cross-realm-safe via `Object.prototype.toString`) + **a binary-frame
+      regression test** (closing the hermetic-suite gap qa flagged — the old fake delivered only `JSON.stringify`
+      strings). qa run 2 confirmed audio flows end-to-end; no regressions.
+    - **✅ LV2-D1 — CLOSED.** `Character` `speakingMs` 4000→**30000** (a safety cap) so the App's **drain-coupled
+      revert** governs the speaking window (host stays speaking for the full audio, falls idle on drain) — the
+      load-bearing revert that LV1-D1 had masked is now re-verified live. _(Process note in `progress.md`: the base
+      implementer overreached forcing this green; the orchestrator reverted the hacks surgically — no hacks remain;
+      lesson = fake-timer flushes use `vi.advanceTimersByTimeAsync`, never raw `setTimeout`.)_
+    - **✅ LV2-D2 — CLOSED.** Relay close-propagation added (`live-relay.ts`: browser WS close → upstream close, +
+      reverse) so the upstream Google WSS no longer lingers on browser disconnect — a TDD'd relay-logic cycle (in the
+      6 green `live-relay` tests). Pre-ECS resource-hygiene item, now closed.
+  - **Carried forward (non-blocking — do NOT re-open the accept):**
+    - **LV1-D2 (minor / cosmetic) — host wakes ~12 s after the event surfaces** (dominated by the real `/narrate`
+      Gemini round-trip that runs before `setSpeakDirective`). The silent→speaking→idle transition is correct
+      (DoD #2 holds); only the **wake latency** is worth a glance for demo snappiness. Filed under Next as a small
+      polish item; not accept-blocking. _(Now that LV1-D1 is fixed, the drain-coupled revert is load-bearing and
+      qa-re-verified — no longer just the `Character` timer.)_
+    - **DEFERRED RELEASE-GATE — LV1 staging deploy is infra-gated** on the ECS Express Mode relay (App Runner can't
+      host WS; navigator already approved the ECS standup, 2026-06-02). **Per the KICKOFF, LV1 is PO-acceptable on
+      the green bar + qa against a LOCAL relay independently of staging** — so this gate does **not** hold the accept;
+      it holds only the PM+dev-ops RELEASE of LV1 to staging. See Decisions needed → "LV1 relay host" (the open
+      sub-question is whole-backend-migrate vs separate-relay-service — PM/dev-ops at release).
 
 ## Next (prioritized)
 
-### LV1 · Live-voice host — `gemini-3.1-flash-live-preview` over the WebSocket Live API (native streaming audio) — `[backend]`→`[frontend]` — milestone: **post-M3 (navigator-chosen)** — priority: **NEXT, before M4** — status: **in-progress · DESIGN DONE (ADR 0007 — topology (b) backend WSS relay) · LV1 KICKOFF in `design-notes.md` · staging-deploy infra-gated (see Decisions needed)**
+### M4 · Two-level ranking + "while you were gone" digest — `[frontend]` — milestone: **M4** — priority: **NEXT (the milestone now in flight, post-LV1)** — status: **todo — UNBLOCKED (LV1 conditionally accepted)**
+  - **Why now:** LV1 is conditionally accepted, so M4 is the next milestone and the **one unmet brief DoD** —
+    **DoD #1** ("a useful digest of what you missed loads on entry; the channel is never empty even at 4am").
+    M4 is pure-FE, no new external dep — a clean next feature (this was always the fallback-first item, and is now
+    simply the next item). _(PO will write the M4 KICKOFF into `design-notes.md` when the orchestrator opens M4;
+    DESIGN: additive-on-existing-contracts ranking + a digest directive — confirm with the architect whether the
+    digest needs any §6 shape change or fits the existing `HostDirective`/`RankedFeed`.)_
+  - **Goal:** event rank → `RankedFeed` desc; vantage rank picks best lens; **digest on load** (DoD #1 — the
+    channel is never empty even at 4am; brief §5/§9 M4).
+  - **Acceptance (sketch — finalize at the M4 KICKOFF):** events sorted by `eventScore` desc; best `lensScore`
+    chosen; a **digest directive produced FIRST on load** (before any timeline event); ≥2 events fire over the
+    timeline. **On any path that emits a `HostDirective`/narration (incl. the digest), re-assert the Based
+    invariants** — the digest line must be **spoiler-safe** (anticipation-only, no leaked outcome, every directive
+    `spoilerSafe: true`), within the **silence budget**, and **cost-gated** (no storm on load).
+  - **Carry-forward risks to TEST HERE (per `progress.md`):** `HostDirective.staging.fireAtMs` (ms) vs
+    `Vantage.offsetSec` (sec) off-by-1000 trap — convert explicitly + test; `RankedFeed.events` "sorted desc by
+    `eventScore`" is a doc-comment the ranker must **PROVE** with an ordering test (M1 used a placeholder
+    `eventScore = heatDelta`).
+  - **Depends on:** M0b contracts ✓, M1 shell ✓. UX-affecting → qa-verifier on green.
+
+### LV1-D2 · host wake latency — shave the ~12 s wake (cosmetic / demo-snappiness) — `[frontend]` — priority: **low (demo-prep)** — status: **todo (carried from LV1 accept — NON-blocking)**
+  - On a surfaced event the host wakes ~12 s late, dominated by the real `/narrate` Gemini round-trip that runs
+    **before** `setSpeakDirective`. The silent→speaking→idle transition itself is correct (DoD #2 holds); only the
+    wake latency reads as sluggish for a demo. _Possible angles (DESIGN if picked):_ overlap/prefetch the `/narrate`
+    call, or surface the cut first and let the voice catch up. **Do NOT re-open the LV1 accept** — this is a polish
+    item. Worth glancing before any external demo (couples with the §13 audible/voice-identity confirmation).
+
+### LV1 · binary-frame regression test — already landed (record only) — `[frontend]` — status: **done (folded into the LV1-D1 fix)**
+  - The hermetic gap qa flagged (the old fake relay delivered only `JSON.stringify` string frames, so the
+    string-only narrator branch passed while real-browser `Blob`/`ArrayBuffer` frames were dropped) is **closed**:
+    the LV1-D1 fix added a binary-frame regression test feeding an `ArrayBuffer` frame. Recorded here so it isn't
+    re-filed; no further action.
+
+### LV1 · Live-voice host — `gemini-3.1-flash-live-preview` over the WebSocket Live API (native streaming audio) — `[backend]`→`[frontend]` — milestone: **post-M3 (navigator-chosen)** — priority: **DONE-conditional (see "Recently accepted — LV1")** — status: **✅ conditionally accepted 2026-06-03 (green bar + invariants + qa pipeline; audible/voice confirmation = navigator at demo) · staging deploy infra-gated (ECS — RELEASE-phase, NOT an accept gate)**
   - **KICKOFF written (PO, 2026-06-02):** the full layer-tagged acceptance is now in `design-notes.md` (this
     sketch below is retained as the rationale record). **12 unit-TDD bullets** (backend mint ×4 incl.
     secrets-from-env; relay/setup ×3 incl. the pure `buildLiveSetup` builder, `Authorization: Token` + setup-once,
@@ -159,14 +250,8 @@ will not pick these ahead of LV1 unless the navigator re-prioritizes for a demo 
       and asserts it passes — a tripwire against FE↔BE seam drift (the two restatements of the §10 safe-input
       list, ADR 0006, drift only if changed without review). Not accept-blocking; fold into POLISH (or do it
       in the #2 cap cycle since both touch `backend/src/modules/narrate/`).
-- **M4 · Two-level ranking + "while you were gone" digest** — `[frontend]` — status: todo — _sequenced AFTER LV1 (navigator's call); still high-value, fallback-first if LV1's live-audio integration proves heavy_
-  - Goal: event rank → `RankedFeed` desc; vantage rank picks best lens; **digest on load** (DoD #1 — the
-    one DoD item still unmet; the channel is never empty even at 4am — brief §5/§9 M4).
-  - Acceptance (sketch): events sorted by `eventScore` desc; best `lensScore` chosen;
-    digest directive produced first; ≥2 events fire over the timeline.
-  - Carry-forward risks to TEST HERE (per progress.md): `HostDirective.staging.fireAtMs` (ms) vs
-    `Vantage.offsetSec` (sec) off-by-1000 trap; `RankedFeed.events` "sorted desc by `eventScore`" is a
-    doc-comment the ranker must PROVE with an ordering test (M1 used a placeholder `eventScore=heatDelta`).
+  - _(M4 promoted to the TOP of Next — see the "M4 · Two-level ranking + digest" entry above; this duplicate
+    removed at the LV1 accept boundary so M4 has one canonical entry.)_
 - **E2E · One DoD journey** — `[e2e]` — status: todo
   - Goal: Playwright journey covering brief §12 end to end (load→digest→events→cut→surf,
     no spoiler). Enable `webServer` in `e2e/playwright.config.ts`. Keep e2e count ≤2.
@@ -257,15 +342,17 @@ will not pick these ahead of LV1 unless the navigator re-prioritizes for a demo 
   frontend 4/4; tdd-critic PASS; qa-verifier N/A (logic-only, no UX).
 
 ## Decisions needed (PO → human navigator)  [brief §13]
-_Status (post-M3, LV1 in flight): **M3 is Done** (shipped on the §10 prompt + recommended hedging
-default; model stubbed in the suite). **spoiler-across-surfaces is now RESOLVED** (rail hedged via
-SPOILER-HARDENING; ADR 0009 — local + green, deploy-gated below). **One §13 wording call remains OPEN but
-non-blocking — tier-aware hedging** — needed only **before a generated line is shown externally** (shapes
-wording, not a seam). **Voice identity is RESOLVING via LV1:** the navigator chose the Gemini Live
-streamed-audio direction, so it moves out of "settled-for-now/external-demo gate" (see below). **Persona /
-rights** stay settled-for-now on the M2 defaults (re-attach at the first external demo) — kept for visibility.
-**Release note:** the two staging demo-blocker fixes (EMBED-TWITCH-PARENT, SPOILER-HARDENING) are **local +
-green but deploy-gated on the CI `GEMINI_MODEL`→SSM fix** — see "Deploy dependency" in the embed follow-ups._
+_Status (post-LV1 conditional accept, 2026-06-03): **LV1 is CONDITIONALLY ACCEPTED** (green bar + invariants +
+qa-confirmed pipeline) with **one navigator action outstanding — the AUDIBLE / voice-identity confirmation at
+demo** (the §13 voice call; recommended default = accept the current Live voice as-is — see "Voice identity"
+below). **M3 is Done.** **spoiler-across-surfaces is RESOLVED** (rail hedged via SPOILER-HARDENING; ADR 0009 —
+now DEPLOYED per `progress.md`). **One §13 wording call remains OPEN but non-blocking — tier-aware hedging** —
+needed only **before a generated line is shown externally** (shapes wording, not a seam). **Two open
+escalations gate the LV1 RELEASE (not the accept):** (1) the **LV1 relay host** infra sub-question (whole-backend
+migrate vs separate relay-only service on the navigator-approved ECS Express Mode); (2) the audible/voice
+confirmation above. **Persona / rights** stay settled-for-now on the M2 defaults (re-attach at the first
+external demo). **Release note:** the embed/spoiler staging fixes are now DEPLOYED (CI `GEMINI_MODEL`→SSM gap
+CLOSED on `ce194e7`) — so model-id-changing releases (incl. LV1's `gemini-3.1-flash-live-preview`) are CI-safe._
 
 - **LV1 relay host — infra-scope: where does the WSS relay run?** **OPEN · escalated 2026-06-02 ·
   release-gate, NOT a BUILD gate.** ADR 0007 topology (b) needs a **persistent-WebSocket-capable host** for the
@@ -300,13 +387,19 @@ green but deploy-gated on the CI `GEMINI_MODEL`→SSM fix** — see "Deploy depe
   merch/clip engine — brief §13). **SETTLED-FOR-NOW:** M2 shipped a single `idle`/`speaking` character
   on the one-host default; carries no rework risk into M3. **Re-attaches at:** the first external demo
   (final name/look). [pending — external-demo gate]
-- **Voice identity — what voice/engine the host speaks in.** **NOW ACTIVE → RESOLVED BY LV1.** Was
-  settled-for-now on Web Speech's default voice (M2/M3, behind the abstracted `speak(text)` — swappable
-  without touching callers). **Navigator decision (2026-06-02): replace Web Speech with native streamed
-  audio from `gemini-3.1-flash-live-preview` over the Live API** (the **LV1 · Live-voice host** milestone
-  above). That is the deliberate-voice direction the §13 call asked for; it makes the host *audibly* alive
-  and lays the conversational-host foundation. Picking the *specific* voice/persona-audio settings within
-  the Live API stays a tuning call for the first external demo. [resolving via LV1]
+- **Voice identity / audible confirmation — does the Gemini Live voice SOUND right?** **⏳ ACTIVE — the LV1
+  accept condition; needs the navigator's EAR (escalated 2026-06-03).** The **engine is resolved** (navigator
+  chose `gemini-3.1-flash-live-preview` streamed audio over Web Speech, 2026-06-02; LV1 is built + conditionally
+  accepted). But LV1's **one qa-only bullet that no agent can close** is whether the streamed voice is **AUDIBLY**
+  right: qa proved the **pipeline executes** end-to-end (37 PCM frames → `audio.play()` → 24 kHz AudioContext →
+  `speak()` resolves on drain → WS closes) and the line is spoiler-safe, but whether it **sounds**
+  audible / intelligible / like the host we want is a **human-ear judgment**. _PO recommendation / default:_
+  **accept the current default Live voice for the prototype demo as-is** (the pipeline is proven; the line is
+  spoiler-safe and matches on screen) — the specific voice/persona-audio config is a low-risk **tuning knob**,
+  not a seam, so it can be adjusted without reshaping anything if the navigator dislikes it. **Action for the
+  navigator:** at demo, listen — if the voice is inaudible/wrong, file an LV1 voice-config defect (output-audio /
+  voice-selection tuning); otherwise this §13 call closes. **Needed by:** the LV1 demo. [ACTIVE — navigator's ear
+  at demo; recommended default above]
 - **Rights/ToS:** official embeds only; never rehost/restream; route value to the source.
   **SETTLED-FOR-NOW:** invariant carries through M2 (cuts render `embedUrl` verbatim) and is unchanged
   by M3 (`/narrate` never touches embeds). The §11 mock's `EXAMPLE_*` placeholders keep proving the
