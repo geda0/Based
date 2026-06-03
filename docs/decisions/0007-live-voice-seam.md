@@ -2,14 +2,21 @@
 
 ## Status
 
-Accepted (prototype phase). **Topology gate RESOLVED → (b) backend WSS relay**
-(see Decision §1; ground-truth study below). **⚠ RE-OPENED by Amendment B
-(2026-06-03): a live-API probe found the header-justification for §1's relay is
-empirically wrong (the WSS authenticates via a `?access_token=` query param a browser
-CAN set, not an `Authorization` header) — Amendment B RECOMMENDS (a) browser-direct,
-gated on a browser-handshake check (B2), which would REVERSE Amendment A2's ECS infra.
-Read Amendment B before §1. Corrections to the mint/method/wire (B0) apply regardless
-of topology.** Extends ADR 0003 (boundaries + Based
+Accepted (prototype phase). **Topology RESOLVED → (a) browser-direct — see
+Amendment C (2026-06-03); the B2 browser probe PASSED and the navigator chose (a).**
+Amendment C **supersedes** the §1 / Amendment-B topology discussion: the backend WSS
+relay (Decision §1, cycles 8–10) is **RETIRED** and Amendment A2's approved ECS Express
+Mode infra is **CANCELLED**. The browser opens Google's Live WSS directly with the
+server-minted ephemeral token (`?access_token=` + `…Constrained` method) and sends the
+`setup` frame itself; App Runner keeps only the plain-HTTP `POST /live/session` mint.
+**Read Amendment C for the resolved seam the TDD pair builds against.** §1 / Amendment
+B (below) are retained append-only for history; where they conflict, **C wins**. The
+mint/method/wire corrections (Amendment B §B0) and the secrets-from-env posture are
+unchanged. _(Prior status, retained for history: "Topology gate RESOLVED → (b) backend
+WSS relay; ⚠ RE-OPENED by Amendment B — a live-API probe found the header-justification
+for §1's relay is empirically wrong (the WSS authenticates via a `?access_token=` query
+param a browser CAN set, not an `Authorization` header) — Amendment B RECOMMENDS (a)
+browser-direct, gated on a browser-handshake check (B2).")_ Extends ADR 0003 (boundaries + Based
 invariants), ADR 0004 (the §6 seam), ADR 0005 (staging topology), and ADR 0006
 (the `/narrate` seam M3 built). Gates **LV1 · Live-voice host** BUILD; the seam
 surface below is now stable enough for the first RED. Append-only. Resolves the §13
@@ -903,3 +910,249 @@ recommendation:
 > line and cycle-7's "FE never sends setup" are now **conditional on the B2 gate** — see
 > ADR 0007 Amendment B. Corrections 2 (Constrained method) & 3 (mint `name→token` +
 > synthesize `expiresAt`) apply to the BUILD regardless of topology.
+
+## Amendment C — topology RESOLVED → (a) browser-direct; relay RETIRED — 2026-06-03
+
+**The B2 browser-handshake gate (Amendment B §B2) PASSED, and the navigator chose
+topology (a) browser-direct.** This amendment is the **terminal resolution** of the
+topology decision Amendment B re-opened: it supersedes §1 (which chose (b) relay) and
+Amendment A2 (which approved ECS Express Mode for the relay), and it confirms Amendment
+B's recommendation. **Append-only**: §1, Amendment A2, and Amendment B §B1/§B4 are not
+rewritten; where they conflict with this section, **C wins** and the conflict is named
+inline. Amendment B §B0 (the three wire corrections) and §B3's "if B2 selects (a)"
+delta are **promoted from contingent to the BUILD contract** by this section.
+
+### C0. The B2 result (ground truth that closed the gate)
+
+A real **Chromium native `WebSocket`** connected **directly** to Google's Live WSS
+(`wss://…GenerativeService.BidiGenerateContentConstrained?access_token=<ephemeral>`),
+sent the `setup` frame **itself**, and received **real 24 kHz PCM audio** (5–7
+frames/turn, `turnComplete`, clean close `1000`, **no `1008`/`1011`**, browser `Origin
+http://localhost:5173`). This **disproves** gvp's "browser-direct fails `1011`" claim
+for this path: gvp's failure was **path-specific/stale** — it fails only on the dead
+`Authorization`-header path (which also produced `1008` in the Amendment B Node probe),
+never on the `?access_token=` + `Constrained` query-param path a browser sets natively.
+**Topology (a) is therefore viable in a real browser** — the B2 PASS branch of
+Amendment B §B2.
+
+### C1. NAVIGATOR DECISION — adopt (a) browser-direct; CANCEL the relay + ECS infra
+
+- **Topology RESOLVED → (a) browser-direct** (supersedes §1's "(b) relay" and Amendment
+  B's "gated on B2" — the gate passed). The browser mints via `POST /live/session`, then
+  opens Google's Live WSS **directly** with the ephemeral token as `?access_token=` (+
+  `…Constrained` method) and drives the session itself.
+- **The backend WSS relay is RETIRED** (§1 Decision, cycles 8–10 — `live-relay.ts` +
+  `live-relay.routes.ts` + their tests). See C5 for the exact deletion list.
+- **Amendment A2's approved ECS Express Mode infra is CANCELLED.** There is no relay and
+  no inbound WSS to host, so **App Runner stays as-is** — it keeps only the plain-HTTP
+  `POST /live/session` mint (request/response, well under the 120 s timeout; App Runner
+  already serves it). This **saves the ~$25–30/mo + the ½-day standup**, **removes the
+  App-Runner-sunset / whole-backend-migration RELEASE sub-question entirely** (nothing
+  needs a persistent-socket host), and **voids the ALB-idle-timeout / WS-keepalive
+  dev-ops gotcha** (A2). The `VITE_LIVE_RELAY_URL` knob is dropped (C2/C5).
+- **Secrets-from-env — UNCHANGED.** The long-lived `GEMINI_API_KEY` stays
+  `process.env`-only, server-side (M3/ADR 0006 guarantee, verbatim). The **only**
+  credential on the wire is the short-lived, single-use, ~3-min ephemeral token — under
+  (a) it now reaches Google **directly** rather than via our relay, but it is the **same
+  token with the same one-expiring-session blast radius** that **Amendment A1 (option B)
+  already accepted** ("the short-lived … ephemeral token transits the browser … accepted
+  for the prototype"). (a) introduces **no new exposure of the long-lived key** — it
+  removes the relay, not a protection.
+
+### C2. The SEAM DELTA — the exact contract for the TDD pair
+
+This is the fixed interface the pair builds against. Three small, bounded changes; the
+§6 contracts, the host loop, cost-gating, `VoiceNarrator`, audio-sink, the cut, and
+spoiler-safety are all **UNCHANGED** (C4).
+
+#### C2.1 `[backend] POST /live/session` now ALSO returns the `setup` frame
+
+So the browser sends the **canonical, server-built** `setup` (the single source of
+truth, never tampered/rebuilt client-side), the mint route returns it alongside the
+token. **Resolved success (`200`) response shape:**
+
+```jsonc
+{
+  "token":     "<short-lived ephemeral token>",   // single-use, ~3-min open window (UNCHANGED, A1)
+  "model":     "gemini-3.1-flash-live-preview",    // BARE id (UNCHANGED, A1)
+  "expiresAt": "<ISO-8601 hard-expiry instant>",   // ~10-min hard expiry (UNCHANGED, A1)
+  "setup":     { "setup": { /* buildLiveSetup({ model }) output */ } }   // NEW — see envelope below
+}
+```
+
+- **`setup` is the FULLY-WRAPPED frame the FE sends VERBATIM** — i.e.
+  `setup = { setup: buildLiveSetup({ model }) }`, the **outer `{ setup: … }` envelope**,
+  exactly the bytes the retired relay used to `JSON.stringify` (`live-relay.ts` line 27).
+  **The FE does NOT re-wrap or rebuild it** — it `JSON.stringify(response.setup)` and
+  sends that. This is deliberate: `live-setup.ts`'s `buildLiveSetup` stays the **single
+  source of truth** for the prefixed `models/…` id + AUDIO-only modality + persona /
+  no-spoiler `systemInstruction`, and the FE holds **zero** knowledge of the setup shape
+  (it cannot drift or omit the no-spoiler instruction). The inner `buildLiveSetup` output
+  is `{ model, generationConfig, systemInstruction }` (per `live-setup.ts`); the route
+  wraps it once in the `{ setup: … }` envelope and returns that under the `setup` key.
+- **`model` is still the BARE id** in the top-level `model` field (A1 unchanged) — the
+  `models/` prefix lives **only inside** the returned `setup` envelope (where
+  `buildLiveSetup` applies it). The FE uses the bare `model` only to build the WSS URL's
+  method/host if it needs it; the prefixed id is carried in `setup` for it.
+- **The route builds `setup` from the SAME `model` it returns** (read once from
+  `process.env.GEMINI_LIVE_MODEL ?? "gemini-3.1-flash-live-preview"`), so the token, the
+  reported `model`, and the `setup` are internally consistent.
+- **Everything else about `/live/session` is UNCHANGED:** its own local zod schema
+  (no cross-workspace import; ADR 0003/0006); reads `GEMINI_API_KEY` + `GEMINI_LIVE_MODEL`
+  from `process.env` only; malformed body → `400`, **mint NOT called** (validate-before-
+  spend); the long-lived key is never accepted from the body, never logged, never in the
+  response; the `@google/genai` mint is the injectable `MintFn` (B0 Correction 3 mapping
+  `name→token` + synthesized `expiresAt` stays). **Adding `setup` does not touch the
+  mint** — `setup` is built from `buildLiveSetup`, a pure function, on the route after the
+  mint returns.
+
+#### C2.2 `[frontend] openRelay` becomes "open the Google Live WSS directly" + carry the setup
+
+`createOpenRelay` (`frontend/src/lib/live-relay-client.ts`) is reworked from "mint →
+open OUR relay" to "mint → open GOOGLE'S WSS directly," and it must **convey the `setup`
+frame to the narrator**:
+
+- Mint via `POST /live/session` (same `VITE_API_BASE_URL` base — UNCHANGED) → read
+  `{ token, model, setup }`.
+- Open **`new WebSocket(\`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}\`)`** —
+  **Google's endpoint, NOT our relay.** `binaryType = 'arraybuffer'` **stays** (the LV1-D1
+  fix: serverContent audio frames arrive as binary). **No `Authorization` header** (a
+  browser cannot set one and it is not needed — B0 Correction 1). The endpoint constant
+  moves here from the retired `live-relay.ts` (it is the **only** place the Google URL now
+  lives).
+- **How the narrator receives `setup` (the resolved mechanism):** the factory's return
+  type widens from `() => RelaySocket` to **`() => { socket: RelaySocket; setup: object }`**
+  (rename `openRelay`→`openSocket`/`connect` at the implementer's discretion; the **fake
+  the tests inject changes shape identically**). The deferred-proxy/synchronous-open
+  contract is preserved — the factory still returns synchronously; `setup` is the
+  already-fetched frame (the proxy resolves the real socket + setup async behind the
+  recorded handlers + send-queue, exactly as today). **The narrator sends `setup` on the
+  socket's `open` event** (C2.3). _(Implementer's latitude: the deferred-proxy may instead
+  surface `setup` via a method on the returned object, e.g. `socket.setup` — the **fixed
+  contract** is only that the narrator obtains the server-built `setup` from the open-edge
+  and sends it first; the §6 contracts and `VoiceNarrator` interface are untouched either
+  way. State the chosen shape in the FE narrator test.)_
+- **Drop `VITE_LIVE_RELAY_URL`** and the `deriveWsBase` relay-URL plumbing (no relay).
+  **Keep `VITE_API_BASE_URL`** (the mint) and **`VITE_LIVE_VOICE`** (the gate).
+- **Failure-silent UNCHANGED:** any mint/connect failure still fires `error` so the
+  narrator REJECTS and the host stays silent.
+
+#### C2.3 `[frontend] live-narrator` sends `setup` FIRST, then `clientContent` — the NEW ordering
+
+Today the narrator (`frontend/src/lib/live-narrator.ts`) sends **only** the
+`clientContent` turn on `open` (the retired relay sent `setup`). Under (a) **the browser
+owns the connection and MUST send `setup` itself.** The resolved ordering contract:
+
+> **On the socket's `open` event, the narrator sends the `setup` frame FIRST, then the
+> `clientContent` line turn — exactly two frames, in that order.**
+
+- Frame 1 (NEW): the **server-built `setup` envelope** received from the open-edge (C2.2),
+  sent **verbatim** — `ws.send(JSON.stringify(setup))`. The narrator does **not** build or
+  inspect it.
+- Frame 2 (UNCHANGED): the existing `clientContent` turn wrapping the line in
+  `Speak only these exact words. Do not add anything. Say: "<UTTERANCE>"`,
+  `turnComplete: true`.
+- **This RE-SPECS KICKOFF cycle #7 / ADR §2's "browser MUST NOT re-send setup."** Under
+  (a) the browser DOES send `setup` — it owns the connection. **The cycle-7 test must be
+  REWRITTEN:** assert the narrator emits **`[setup, clientContent]` in order** (was:
+  asserts exactly one `clientContent` and **no** `setup` — that negative assertion is now
+  **inverted**). Everything downstream (audio routing, drain-coupled resolve, close-on-end,
+  cost-gating) is UNCHANGED — see C4.
+- **Spoiler-safety UNCHANGED (C4):** the spoken line is still the already-spoiler-safe
+  `HostDirective.utterance` constrained to "speak only these exact words"; the no-spoiler
+  `systemInstruction` (defense-in-depth) is now asserted on the **FE-sent setup frame**
+  (which is the server-built `buildLiveSetup` output) instead of the relay's.
+
+### C3. Wire corrections B0 §2 & §3 — STILL APPLY (already landed)
+
+Amendment B Corrections **2** (ephemeral token ⇒ `…BidiGenerateContentConstrained` +
+`?access_token=`, no `Authorization` header) and **3** (real mint maps
+`authToken.name → token`, synthesizes `expiresAt`) apply under (a). Both are **already
+in the tree** — `live-token-client.ts` does the `name→token`/`expiresAt` mapping, and
+the `…Constrained` + `?access_token=` form is the one C2.2 moves into the FE open-edge.
+Correction 1's header-vs-query-param point is now moot (no relay; the browser sets the
+query param natively).
+
+### C4. UNCHANGED — the pair must NOT reshape these
+
+Confirmed stable; **out of scope for this delta**:
+
+- **§6 contracts** (`frontend/src/contracts/`): `HostDirective` keeps its M2 shape —
+  `utterance` is the line; audio is a rendering of it; `spoilerSafe: true` stays
+  compiler-enforced on every directive. No `setup`/token/session type leaks into §6.
+- **`host-loop.ts` / `narrating-host-loop.ts`**: the decision + cost-gate + failure-silent
+  logic. The loop emits `speak` only on a surfacing event clearing the threshold + silence
+  budget; a rejected `speak` drops the directive (degrade to silence), keeps the `cutTo`.
+- **The `VoiceNarrator` interface the App consumes**: `speak(text): Promise<void>` +
+  optional idempotent `stop()`. Web Speech (`defaultVoice` in `App.tsx`) still satisfies
+  it as the fallback behind `VITE_LIVE_VOICE`.
+- **`audio-sink.ts`** (the PCM decode/playback edge) and **the LV1-D1 `arraybuffer`
+  decode** in the narrator's `message` handler — unchanged.
+- **Cost-gating posture**: open the (now Google-direct) socket **only** inside `speak(...)`
+  — zero on construction/idle, exactly one per surfacing `speak`, closed on turn-drain
+  (open/close per utterance, §3). The cost-gating cycle asserts on the injected open-edge
+  regardless of what it connects to.
+- **The drain-coupled resolve (LV2-D1)** — `speak(...)` resolves only after `turnComplete`
+  **and** all scheduled audio has drained; `close()` fires once on utterance-end.
+- **The cut**: `cutToVantage.embedUrl` rendered verbatim; the audio path never touches
+  embeds/vantages (official-embeds-only kept).
+- **Spoiler-safety**: the spoken line is the already-safe `HostDirective.utterance` from
+  the `/narrate` text path (ADR 0006, the single source of truth for content); the
+  `setup` `systemInstruction` restates no-spoiler as defense-in-depth. `/narrate` is NOT
+  retired.
+
+### C5. RETIREMENT list (delete) — recommended for the prototype
+
+Topology (a) makes the relay dead code. **Recommendation: DELETE it** (not keep as a
+fallback) — the B2 PASS removes the only reason to keep a fallback path, and a dead
+off-by-default relay is rot + a second Google-socket code path to keep correct. If the
+threat model later tightens toward "token must never leave the server" (Amendment A1's
+named (A) upgrade), the relay is reintroduced deliberately and recorded here append-only;
+git history preserves it until then.
+
+- **Delete `backend/src/modules/live/live-relay.ts`** (the relay pipe; cycle 8–10).
+- **Delete `backend/src/modules/live/live-relay.routes.ts`** and its registration in
+  `backend/src/app.ts` (the `import { registerLiveRelayRoute }` line + the
+  `registerLiveRelayRoute(app);` call). `app.ts` keeps `registerLiveRoutes` (the mint).
+- **Delete `backend/tests/live-relay.test.ts`** (relay forward/buffering/close-propagation
+  cycles 8–10).
+- **Remove backend deps `@fastify/websocket`, `ws`, `@types/ws`** from
+  `backend/package.json` (added solely for the relay; the mint is plain HTTP).
+- **Frontend:** rework (not delete) `live-relay-client.ts` per C2.2 (it becomes the
+  Google-direct open-edge); **rewrite** `frontend/tests/live-narrator.test.ts` cycle-7
+  assertion per C2.3 (setup-then-clientContent); **drop `VITE_LIVE_RELAY_URL`** wherever
+  referenced (`live-relay-client.ts`; and as stale notes in `design-notes.md` /
+  `backlog.md` / ADR 0005 — those are doc cleanups, not code).
+- **`/live/session` (mint) STAYS** — extended per C2.1 to also return `setup`. It is the
+  **only** backend live surface.
+
+### C6. The TDD pass this enables (for the orchestrator)
+
+A tight three-strand pass against the fixed contract above:
+
+1. **`[backend]` `/live/session` returns `setup`** — RED: assert the `200` body includes
+   `setup` equal to `{ setup: buildLiveSetup({ model }) }` (the wrapped envelope, prefixed
+   model, AUDIO-only, no-spoiler `systemInstruction`), built from the same env model it
+   reports. The existing token/model/expiresAt/400-no-spend/secrets cycles **stay green**
+   (the addition is purely additive to the response).
+2. **`[frontend]` narrator sends `setup` then `clientContent`** — REWRITE cycle-7: the
+   open-edge now yields `{ socket, setup }`; assert the narrator emits **two** frames on
+   `open`, `[setup, clientContent]` in order (the no-`setup` negative assertion is
+   inverted). The other FE narrator cycles (audio routing, drain-resolve, close-on-end,
+   failure-silent, cost-gating: zero-on-idle/one-per-speak) **stay green** — they assert on
+   the injected edge, not on what it connects to.
+3. **Retire the relay** — delete the C5 files/deps; the suite goes green with the relay
+   cycles removed.
+4. **Re-qa** (qa-verifier, M3-style live probe — already effectively done by B2): browser
+   mints, opens Google WSS direct, sends setup+clientContent, hears Gemini Live audio; the
+   spoken line == the on-screen safe `utterance`, no pre-cut spoiler; silence budget holds.
+
+The hermetic suite still **never opens a real socket** — both the backend `setup`-shape
+test and the FE narrator tests inject fakes; only the throwaway re-qa touches the network.
+
+> **design-notes pointer:** topology is RESOLVED → **(a) browser-direct** (ADR 0007
+> **Amendment C**); the relay (cycles 8–10) + ECS Express Mode (A2) are **retired/
+> cancelled**. `/live/session` now also returns the `setup` frame (`{ setup:
+> buildLiveSetup({ model }) }`, sent verbatim by the FE); the FE narrator sends **setup →
+> clientContent** on `open` (cycle-7 inverted). §6 contracts, host loop, cost-gating,
+> `VoiceNarrator`, audio-sink, spoiler-safe `/narrate` path = UNCHANGED.

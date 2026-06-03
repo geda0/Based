@@ -1,8 +1,19 @@
 # Design notes — Based prototype · LV1 · Live-voice host (native Gemini Live audio) — KICKOFF
 
+> **⚠ TOPOLOGY RESOLVED → (a) BROWSER-DIRECT (ADR 0007 Amendment C, 2026-06-03).** The B2 browser probe
+> PASSED; navigator chose (a). The backend WSS **relay is RETIRED** (cycles 8–10) and Amendment A2's **ECS
+> Express Mode infra is CANCELLED** (App Runner keeps only the HTTP `/live/session` mint). SEAM DELTA the pair
+> builds against: (1) `/live/session` now ALSO returns the `setup` frame — `{ setup: buildLiveSetup({ model }) }`,
+> the wrapped envelope the FE sends VERBATIM; (2) FE `openRelay`→"open Google's Live WSS directly"
+> (`wss://…BidiGenerateContentConstrained?access_token=<token>`, `binaryType='arraybuffer'`), returning
+> `{ socket, setup }`; drop `VITE_LIVE_RELAY_URL`, keep `VITE_API_BASE_URL` + `VITE_LIVE_VOICE`; (3) FE narrator
+> sends **setup → clientContent** on `open` (re-specs / **inverts** cycle-7's "FE never sends setup"). UNCHANGED:
+> §6 contracts, host loop, cost-gating, `VoiceNarrator`, audio-sink, spoiler-safe `/narrate` path. **See ADR 0007
+> Amendment C §C2 (seam) + §C5 (retirement list) + §C6 (the TDD pass).** The §1/§B references below are superseded.
+
 > **STATUS: LV1 KICKOFF — ready for the inner TDD loop.** DESIGN is DONE: architect resolved the seam in
-> **ADR 0007** (topology gate → **(b) backend WSS relay**; the wire contract, setup frame, and FE
-> `VoiceNarrator` shape are all fixed there). This file turns ADR 0007 into the layer-tagged acceptance
+> **ADR 0007** (topology → **(a) browser-direct — Amendment C**; supersedes the "(b) backend WSS relay" the
+> body still describes; the wire contract, setup frame, and FE `VoiceNarrator` shape are all fixed there). This file turns ADR 0007 into the layer-tagged acceptance
 > bullets the orchestrator picks behaviors from. **Scope is LV1 only:** a **transport swap behind the
 > existing speak path** — the host loop, cost-gating, the §6 contracts (`frontend/src/contracts/`), and
 > the spoiler-safe TEXT path (`/narrate`, ADR 0006) are **UNCHANGED**. LV1 only changes **HOW** a line is

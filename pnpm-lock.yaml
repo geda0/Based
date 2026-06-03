@@ -26,18 +26,12 @@ importers:
       '@fastify/cors':
         specifier: ^9
         version: 9.0.1
-      '@fastify/websocket':
-        specifier: ^8.3.1
-        version: 8.3.1
       '@google/genai':
         specifier: ^2.7.0
         version: 2.7.0
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -45,9 +39,6 @@ importers:
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.41
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
       tsx:
         specifier: ^4.16.0
         version: 4.22.4
@@ -580,9 +571,6 @@ packages:
   '@fastify/merge-json-schemas@0.1.1':
     resolution: {integrity: sha512-fERDVz7topgNjtXsJTTW1JKLy0rhuLRcquYqNR9rF7OcVpCa2OVW49ZPDIhaRRCaUuvVxI+N416xUoF76HNSXA==}
 
-  '@fastify/websocket@8.3.1':
-    resolution: {integrity: sha512-hsQYHHJme/kvP3ZS4v/WMUznPBVeeQHHwAoMy1LiN6m/HuPfbdXq1MBJ4Nt8qX1YI+eVbog4MnOsU7MTozkwYA==}
-
   '@google/genai@2.7.0':
     resolution: {integrity: sha512-tv0DRtcndt2oEhBYy+5mA0TaXH98+L1Gt0AP9unBfH7DP20KhB7+O3QqAN1Lz+laMARGTHS7BFQSNpLbl4gm1g==}
     engines: {node: '>=20.0.0'}
@@ -860,9 +848,6 @@ packages:
 
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
-
-  '@types/ws@8.18.1':
-    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@typescript-eslint/eslint-plugin@8.60.1':
     resolution: {integrity: sha512-JQ4S5GB0tfjO8BuJ4fcX+HodkzJjYBV+7OJ+wLygaX7OGQ7FudyHL4NSCA6ob+w3Yn+5MkKIozOwQhXeM7opVg==}
@@ -2448,14 +2433,6 @@ snapshots:
     dependencies:
       fast-deep-equal: 3.1.3
 
-  '@fastify/websocket@8.3.1':
-    dependencies:
-      fastify-plugin: 4.5.1
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   '@google/genai@2.7.0':
     dependencies:
       google-auth-library: 10.6.2
@@ -2684,10 +2661,6 @@ snapshots:
       csstype: 3.2.3
 
   '@types/retry@0.12.0': {}
-
-  '@types/ws@8.18.1':
-    dependencies:
-      '@types/node': 20.19.41
 
   '@typescript-eslint/eslint-plugin@8.60.1(@typescript-eslint/parser@8.60.1(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)':
     dependencies:

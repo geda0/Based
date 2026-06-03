@@ -2,6 +2,7 @@ export type RelaySocket = {
   on(event: string, cb: (...args: unknown[]) => void): void;
   send(data: unknown): void;
   close?(): void;
+  setup?: unknown;
 };
 
 export type AudioSink = {
@@ -45,6 +46,7 @@ export function createLiveNarrator(deps: {
         }
 
         ws.on("open", () => {
+          ws.send(JSON.stringify(ws.setup));
           ws.send(
             JSON.stringify({
               clientContent: {

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { liveSessionRequestSchema } from "./live.schema.js";
+import { buildLiveSetup } from "./live-setup.js";
 
 // The injectable mint seam (mirrors the GeminiClient seam in narrate.routes.ts):
 // one async method, so tests inject a stub and the real @google/genai client
@@ -26,6 +27,6 @@ export function registerLiveRoutes(app: FastifyInstance, mintClient: LiveTokenCl
     // BARE model id — the `models/` prefix is the relay/buildLiveSetup's job,
     // never this route's (ADR 0007 §2).
     const model = process.env.GEMINI_LIVE_MODEL ?? DEFAULT_LIVE_MODEL;
-    return { token, model, expiresAt };
+    return { token, model, expiresAt, setup: { setup: buildLiveSetup({ model }) } };
   });
 }

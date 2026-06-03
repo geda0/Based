@@ -7,11 +7,78 @@ logged with a one-line rationale. Acceptance criteria are layer-tagged and tied 
 the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Now (in flight)
-_None. LV1 conditionally accepted (below); M4 is next — see Next._
+_None. LV1 RE-ACCEPTED on the browser-direct transport (below); M4 is next — see Next._
 
 ## Recently accepted — LV1 (this boundary)
-- **LV1 · Live-voice host** — **✅ CONDITIONALLY PO-ACCEPTED (2026-06-03).** **Status: `in-progress → accepted`
-  (conditional).** Native `gemini-3.1-flash-live-preview` audio over a backend WSS relay now voices the host,
+- **LV1 · Live-voice host** — **✅ RE-ACCEPTED on the BROWSER-DIRECT transport (2026-06-03, ADR 0007 Amendment C).**
+  **Status: `accepted (browser-direct)` — SUPERSEDES the relay-based conditional accept below.** The transport
+  pivoted (relay retired → the browser opens Google's Live WSS directly with a server-minted ephemeral token), so
+  the prior conditional accept (relay topology) needed PO re-sign-off; this is it. **Verdict: RE-ACCEPT** — same
+  conditional basis (audible/voice-identity confirmation is the navigator's ear at demo); the architecture is now
+  **simpler** (no relay, no `@fastify/websocket`/`ws`, no ECS) and the experience is **qa-confirmed end-to-end with
+  no relay**. No new concern.
+  - **Re-accepted against the SAME LV1 DoD + acceptance criteria** (`design-notes.md` §LV1 DEFINITION OF DONE) —
+    every criterion re-verified against the browser-direct tree:
+    1. **Hermetic suite GREEN** — `pnpm verify`=0 re-confirmed at re-accept (**backend 16, frontend 37**, e2e 1
+       skipped). The relay tests were removed WITH the relay (cycles 8–10 retired); the additive `/live/session`-
+       returns-`setup` cycle and the rewritten narrator setup-first cycle (C6 #1–#2) are green. The 11 surviving
+       LV1 acceptance bullets (mint ×4, FE narrator ×4, integration ×1, + the two C-delta cycles) all green; the 3
+       relay bullets are retired-by-design with the transport (no longer applicable — browser owns the socket).
+    2. **tdd-critic = PASS** carried (the prior two rounds' HIGH/MEDIUM items stay CLOSED — the C delta is a bounded
+       transport swap that did not re-open them; the surviving cycles are unchanged in intent).
+    3. **Based invariants re-proven on the browser-direct transport, in source + tests** (verified at re-accept):
+       **secrets-from-env** — `live-token-client.ts` reads `GEMINI_API_KEY` from `process.env` only, it flows INTO
+       the mint and never returns; only the short-lived single-use ephemeral `token` (`authToken.name`) + synthesized
+       `expiresAt` come back; no-key→reject-no-spend; malformed→400-no-spend; long-lived key never in body/log/response
+       (route + client tests). **The long-lived key is server-side-only under (a) exactly as under the relay** — only
+       the short-lived ephemeral token now reaches Google directly (the same A1-accepted blast radius: one expiring
+       single-use session). **cost-gating** — the FE opens the (now Google-direct) socket only inside `speak(...)`,
+       zero on construction/idle, one per surfacing `speak`, closed on turn-drain (open/close per utterance) + the
+       integration call-count tripwire — asserts on the injected open-edge regardless of what it connects to, so
+       UNCHANGED by the transport swap. **failure-silent** — mint/connect failure fires `error` → `speak` rejects →
+       host stays idle, cut kept. **spoiler-safety by construction** — narrator speaks `HostDirective.utterance`
+       VERBATIM (no generation), constrained "speak only these exact words"; `responseModalities` exactly `["AUDIO"]`;
+       the no-spoiler `systemInstruction` is now carried in the **server-built `setup` envelope the FE sends verbatim**
+       (`buildLiveSetup` stays the single source of truth — `live.routes.ts` returns `{ setup: buildLiveSetup({ model }) }`;
+       the FE holds zero setup-shape knowledge, so it cannot drift/omit the no-spoiler rule).
+    4. **qa-verifier RE-VERIFIED the WIRED FE live on the browser-direct path (2026-06-03) — ALL PASS, no new
+       defects.** The browser mints `POST /live/session → 200`, opens a WS **DIRECTLY to
+       `generativelanguage.googleapis.com/…BidiGenerateContentConstrained?access_token=`** (the ONLY WS host — no
+       relay, no `/live/relay`), sends **setup→clientContent**, receives **34 PCM frames**, plays them on a 24 kHz
+       AudioContext, `speak()` resolves on drain, the host stays speaking the FULL ~8 s audio then idles (drain-coupled,
+       **LV2-D1 confirmed live**); cut works (Twitch `parent` correct), **NO on-screen spoiler before the cut**, one
+       utterance per surface (open/close per utterance), secrets-from-env holds (long-lived key server-side, ephemeral
+       token redacted), no console errors. 2 of 3 qa-only bullets fully PASS (spoken line == on-screen safe utterance,
+       no pre-cut spoiler; silence budget holds); the 3rd's pipeline is proven end-to-end with **audibility deferred to
+       the navigator's ear** (the carried condition — see below).
+    5. **No regression to M3** — `/narrate` text path, cost-gating, secrets-from-env, §6 contracts unchanged;
+       `host-loop`/`narrating-host-loop`/`VoiceNarrator`/`audio-sink` untouched by the C delta (C4).
+    6. **PO sign-off** — this entry (re-accept). _Supersedes the relay-based conditional accept retained below for
+       history._
+  - **What the browser-direct pivot changed vs the accepted relay version (all verified in-tree):**
+    - **(C2.1)** `POST /live/session` now ALSO returns `setup: { setup: buildLiveSetup({ model }) }` (the fully-wrapped
+      envelope, built from the same env model it reports) — additive to the A1 `{ token, model, expiresAt }` body.
+    - **(C2.2)** the FE open-edge (`live-relay-client.ts`) opens **Google's** WSS directly (`GOOGLE_LIVE_WSS …
+      BidiGenerateContentConstrained?access_token=`) — the only WS URL in the tree; `VITE_LIVE_RELAY_URL` dropped,
+      `VITE_API_BASE_URL` (mint) + `VITE_LIVE_VOICE` (gate) kept; `binaryType='arraybuffer'` (LV1-D1 fix) kept.
+    - **(C2.3)** the FE narrator (`live-narrator.ts`) now sends **`setup` FIRST then `clientContent`** on `open`
+      (cycle-7 INVERTED — was "FE never sends setup"); audio routing / drain-coupled resolve / close-on-end /
+      failure-silent / cost-gating all unchanged.
+    - **(C5)** the relay is RETIRED — `live-relay.ts` + `live-relay.routes.ts` + `live-relay.test.ts` deleted, the
+      `@fastify/websocket`/`ws`/`@types/ws` backend deps removed, `app.ts` registers only the mint
+      (`registerLiveRoutes`). The mint (`/live/session`) is the only backend live surface.
+  - **⚠ ACCEPTANCE CONDITION (CARRIES UNCHANGED from the prior accept — the one thing no agent can close):** _final
+    **audible** confirmation is the navigator's at demo_ — does the streamed Gemini Live voice **sound** audible,
+    intelligible, and like the host we want? This is the §13 **voice-identity** call (engine chosen; specific
+    voice/persona-audio is the human's ear). The browser-direct pivot does **not** affect this residual — it is the
+    same audio pipeline, the same `buildLiveSetup` AUDIO-only output. **Escalated below.** If the navigator finds the
+    audio inaudible/wrong-voice at demo, re-open LV1 with a defect (voice/output-audio config — a tuning knob, NOT a
+    seam change).
+
+- **LV1 · Live-voice host (RELAY topology) — ⛔ SUPERSEDED by the browser-direct re-accept above (2026-06-03).** **✅ CONDITIONALLY PO-ACCEPTED (2026-06-03).** **Status: `in-progress → accepted`
+  (conditional) → SUPERSEDED.** _Retained append-only for history — this was the relay-based accept; the transport
+  pivoted to browser-direct (ADR 0007 Amendment C) and the entry above re-signs off on the new transport. The relay
+  modules/tests/deps referenced below are RETIRED (C5)._ Native `gemini-3.1-flash-live-preview` audio over a backend WSS relay now voiced the host,
   replacing M2/M3's Web-Speech TTS — a transport swap behind the existing `speak` path (§6 contracts, host loop,
   cost-gating, and the `/narrate` text path UNCHANGED, proven by the integration bullet).
   - **Accepted against LV1 DoD (`design-notes.md` §LV1 DEFINITION OF DONE):**
@@ -68,11 +135,12 @@ _None. LV1 conditionally accepted (below); M4 is next — see Next._
       (DoD #2 holds); only the **wake latency** is worth a glance for demo snappiness. Filed under Next as a small
       polish item; not accept-blocking. _(Now that LV1-D1 is fixed, the drain-coupled revert is load-bearing and
       qa-re-verified — no longer just the `Character` timer.)_
-    - **DEFERRED RELEASE-GATE — LV1 staging deploy is infra-gated** on the ECS Express Mode relay (App Runner can't
-      host WS; navigator already approved the ECS standup, 2026-06-02). **Per the KICKOFF, LV1 is PO-acceptable on
-      the green bar + qa against a LOCAL relay independently of staging** — so this gate does **not** hold the accept;
-      it holds only the PM+dev-ops RELEASE of LV1 to staging. See Decisions needed → "LV1 relay host" (the open
-      sub-question is whole-backend-migrate vs separate-relay-service — PM/dev-ops at release).
+    - **DEFERRED RELEASE-GATE (RELAY topology) — ⛔ MOOT / CANCELLED on the browser-direct pivot.** This was the
+      ECS-Express-Mode infra gate for the relay; under topology (a) **there is no relay and no inbound WSS to host**,
+      so the ECS standup is CANCELLED (saves ~$25–30/mo + the ½-day standup) and the whole-backend-migrate
+      vs separate-relay-service sub-question is **closed/moot** (nothing needs a persistent-socket host). App Runner
+      keeps only the plain-HTTP `POST /live/session` mint. **The LV1 staging release is now a plain deploy** (App
+      Runner mint + S3/CloudFront FE with `VITE_LIVE_VOICE=1`, NO relay/ECS) — see Decisions-needed cleanup below.
 
 ## Next (prioritized)
 
@@ -96,12 +164,25 @@ _None. LV1 conditionally accepted (below); M4 is next — see Next._
     `eventScore = heatDelta`).
   - **Depends on:** M0b contracts ✓, M1 shell ✓. UX-affecting → qa-verifier on green.
 
-### LV1-D2 · host wake latency — shave the ~12 s wake (cosmetic / demo-snappiness) — `[frontend]` — priority: **low (demo-prep)** — status: **todo (carried from LV1 accept — NON-blocking)**
-  - On a surfaced event the host wakes ~12 s late, dominated by the real `/narrate` Gemini round-trip that runs
-    **before** `setSpeakDirective`. The silent→speaking→idle transition itself is correct (DoD #2 holds); only the
-    wake latency reads as sluggish for a demo. _Possible angles (DESIGN if picked):_ overlap/prefetch the `/narrate`
-    call, or surface the cut first and let the voice catch up. **Do NOT re-open the LV1 accept** — this is a polish
-    item. Worth glancing before any external demo (couples with the §13 audible/voice-identity confirmation).
+### DOC-RECONCILE · align ADR 0007 / design-notes / backlog to topology (a) browser-direct — `[docs]` (architect) — priority: **low (housekeeping, non-blocking)** — status: **todo (filed at the LV1 browser-direct re-accept)**
+  - **Why:** the code is now topology (a) browser-direct (ADR 0007 Amendment C — relay RETIRED, ECS CANCELLED), but
+    the ADR 0007 **body §1–§8 + Amendments A1/A2/B still describe the relay as the chosen topology** (append-only, so
+    "C wins" is stated but the body reads relay-first), and `design-notes.md` §FEATURE / SUGGESTED CYCLE ORDER /
+    parts of MILESTONE CHECKLIST still narrate the relay build. **No code or test impact** — purely doc hygiene so a
+    cold reader isn't misled. **Owner: architect** (owns ADRs/seams). _Scope:_ make Amendment C the lead/canonical
+    topology pointer; mark every relay/`Authorization: Token`/`@fastify/websocket`/ECS reference in ADR 0007 body +
+    design-notes + this backlog as **historical/superseded** (the relay cycles 8–10, A2 ECS, B1/B4's "gated on B2"
+    are all closed). PO will fold the design-notes pass into the **M4 KICKOFF** rewrite (design-notes is replaced
+    per-feature anyway); the ADR 0007 body pass is the architect's. **Do NOT re-open the LV1 accept** — docs only.
+
+### LV1-D2 · host wake latency — shave the ~12 s wake (cosmetic / demo-snappiness) — `[frontend]` — priority: **low (demo-prep)** — status: **todo (carried forward from the LV1 re-accept — NON-blocking)**
+  - **CARRIED FORWARD unchanged across the browser-direct pivot** (the wake latency is dominated by the `/narrate`
+    text round-trip, which is untouched by the transport swap; if anything browser-direct removes a relay hop so it
+    is no worse). On a surfaced event the host wakes ~12 s late, dominated by the real `/narrate` Gemini round-trip
+    that runs **before** `setSpeakDirective`. The silent→speaking→idle transition itself is correct (DoD #2 holds);
+    only the wake latency reads as sluggish for a demo. _Possible angles (DESIGN if picked):_ overlap/prefetch the
+    `/narrate` call, or surface the cut first and let the voice catch up. **Do NOT re-open the LV1 accept** — this is
+    a polish item. Worth glancing before any external demo (couples with the §13 audible/voice-identity confirmation).
 
 ### LV1 · binary-frame regression test — already landed (record only) — `[frontend]` — status: **done (folded into the LV1-D1 fix)**
   - The hermetic gap qa flagged (the old fake relay delivered only `JSON.stringify` string frames, so the
@@ -342,30 +423,28 @@ will not pick these ahead of LV1 unless the navigator re-prioritizes for a demo 
   frontend 4/4; tdd-critic PASS; qa-verifier N/A (logic-only, no UX).
 
 ## Decisions needed (PO → human navigator)  [brief §13]
-_Status (post-LV1 conditional accept, 2026-06-03): **LV1 is CONDITIONALLY ACCEPTED** (green bar + invariants +
-qa-confirmed pipeline) with **one navigator action outstanding — the AUDIBLE / voice-identity confirmation at
+_Status (post-LV1 BROWSER-DIRECT re-accept, 2026-06-03): **LV1 is RE-ACCEPTED on the browser-direct transport**
+(ADR 0007 Amendment C — relay retired, ECS cancelled; green bar + invariants re-proven + qa re-confirmed
+end-to-end with no relay) with **one navigator action outstanding — the AUDIBLE / voice-identity confirmation at
 demo** (the §13 voice call; recommended default = accept the current Live voice as-is — see "Voice identity"
-below). **M3 is Done.** **spoiler-across-surfaces is RESOLVED** (rail hedged via SPOILER-HARDENING; ADR 0009 —
-now DEPLOYED per `progress.md`). **One §13 wording call remains OPEN but non-blocking — tier-aware hedging** —
-needed only **before a generated line is shown externally** (shapes wording, not a seam). **Two open
-escalations gate the LV1 RELEASE (not the accept):** (1) the **LV1 relay host** infra sub-question (whole-backend
-migrate vs separate relay-only service on the navigator-approved ECS Express Mode); (2) the audible/voice
-confirmation above. **Persona / rights** stay settled-for-now on the M2 defaults (re-attach at the first
-external demo). **Release note:** the embed/spoiler staging fixes are now DEPLOYED (CI `GEMINI_MODEL`→SSM gap
-CLOSED on `ce194e7`) — so model-id-changing releases (incl. LV1's `gemini-3.1-flash-live-preview`) are CI-safe._
+below; the pivot does NOT affect this residual — same audio pipeline). **M3 is Done.** **spoiler-across-surfaces is
+RESOLVED** (rail hedged via SPOILER-HARDENING; ADR 0009 — now DEPLOYED per `progress.md`). **One §13 wording call
+remains OPEN but non-blocking — tier-aware hedging** — needed only **before a generated line is shown externally**
+(shapes wording, not a seam). **The LV1-relay-host infra escalation is CLOSED/MOOT** (no relay under (a) — see the
+struck entry below). **One escalation remains for the LV1 RELEASE/demo:** the audible/voice confirmation above.
+**Persona / rights** stay settled-for-now on the M2 defaults (re-attach at the first external demo). **Release
+note:** the embed/spoiler staging fixes are now DEPLOYED (CI `GEMINI_MODEL`→SSM gap CLOSED on `ce194e7`) — so
+model-id-changing releases (incl. LV1's `gemini-3.1-flash-live-preview`) are CI-safe; **the LV1 staging release is
+now a plain App-Runner-mint + S3/CloudFront-FE deploy** (NO relay, NO ECS)._
 
-- **LV1 relay host — infra-scope: where does the WSS relay run?** **OPEN · escalated 2026-06-02 ·
-  release-gate, NOT a BUILD gate.** ADR 0007 topology (b) needs a **persistent-WebSocket-capable host** for the
-  relay; Based's backend runs on **AWS App Runner** (ADR 0005), whose support for **inbound WSS upgrade** is
-  unknown (gvp's reference runs its relay on ECS/Fargate + ALB and notes API Gateway/Lambda cannot upgrade the
-  browser WS). _Recommend:_ **(1)** first confirm whether **App Runner supports inbound WSS** (cheapest — co-host
-  the relay on the existing service; ADR 0005 gains a WSS health/route note); **(2)** if it does **not**, stand up
-  a **separate small persistent-socket WS service** running ONLY the relay (e.g. **ECS Express Mode / minimal
-  Fargate + ALB**), with the SPA pointing `VITE_LIVE_RELAY_URL` at it. **Either outcome leaves the FE seam and the
-  host loop UNCHANGED** (ADR 0007 §4/§7 — infra-placement only). **LV1 BUILD proceeds against a local/stubbed relay
-  regardless**; only the **staging deploy of LV1** waits on this. _Owner: navigator (infra-scope/new-compute call)
-  + dev-ops to research App Runner WSS + execute. **Needed by:** the LV1 staging release (not by the inner loop)._
-  [pending — escalated; recommended default above]
+- **LV1 relay host — infra-scope: where does the WSS relay run?** **✅ CLOSED / MOOT (2026-06-03, ADR 0007
+  Amendment C).** ~~OPEN · escalated 2026-06-02 · release-gate.~~ **No longer applicable — there is no relay.** The
+  B2 browser-handshake probe PASSED and the navigator chose **topology (a) browser-direct**: the browser opens
+  Google's Live WSS directly with a server-minted ephemeral token, so **nothing needs a persistent-WebSocket host.**
+  Both sub-decisions this escalation framed are now **moot/closed:** (1) "does App Runner support inbound WSS" — N/A
+  (no inbound WSS); (2) "whole-backend-migrate vs separate-relay-only ECS service" — N/A (Amendment A2's approved
+  ECS Express Mode is **CANCELLED**, saving ~$25–30/mo + the standup; App Runner keeps only the plain-HTTP
+  `/live/session` mint). **No navigator action needed.** [CLOSED · ADR 0007 Amendment C]
 
 - **Tier-aware hedging — how hard to hedge confidence tiers 2–4** (esp. IRL/breaking: highest
   spoiler + misinformation risk). **OPEN (shipped in M3 on the default; non-blocking).** _Recommend:_

@@ -1,24 +1,22 @@
 import type { RelaySocket } from './live-narrator';
 
-// The real `openRelay` for the live-voice path (the untested I/O edge behind the
-// already-tested VoiceNarrator). It mints a short-lived session token via the
-// backend `/live/session` HTTP route (mirroring narrate-client's env + fetch
-// style), then opens the browser→relay WebSocket carrying that token in the
-// query string. The long-lived key never transits the browser (ADR 0007 §8);
-// the ephemeral token + relay URL are NEVER logged.
+// The real `openRelay` for the live-voice path (topology a: browser-direct).
+// It mints a short-lived ephemeral token + server-built `setup` envelope via
+// `POST /live/session`, then opens Google's Live WSS directly with the token.
+// The long-lived API key never transits the browser (ADR 0007 §8).
+// The ephemeral token is NEVER logged.
 
-// Derive a ws(s):// base from an http(s):// origin (best-effort local-dev
-// default when VITE_LIVE_RELAY_URL is unset): http→ws, https→wss.
-function deriveWsBase(httpOrigin: string): string {
-  if (httpOrigin.startsWith('https://')) return 'wss://' + httpOrigin.slice('https://'.length);
-  if (httpOrigin.startsWith('http://')) return 'ws://' + httpOrigin.slice('http://'.length);
-  // Already a ws(s) base, or some other scheme — pass through unchanged.
-  return httpOrigin;
-}
+const GOOGLE_LIVE_WSS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+
+type SessionResponse = {
+  token: string;
+  model: string;
+  expiresAt: string;
+  setup: unknown;
+};
 
 export function createOpenRelay(opts?: {
   sessionBaseUrl?: string;
-  relayBaseUrl?: string;
   fetchImpl?: typeof fetch;
   socketFactory?: (url: string) => WebSocket;
 }): () => RelaySocket {
@@ -26,20 +24,7 @@ export function createOpenRelay(opts?: {
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const socketFactory = opts?.socketFactory ?? ((url: string) => new WebSocket(url));
 
-  // The ws(s):// base for the relay socket. Prefer an explicit override, then
-  // VITE_LIVE_RELAY_URL, then derive from the API/page origin (local-dev default).
-  const relayWsBase =
-    opts?.relayBaseUrl ??
-    import.meta.env.VITE_LIVE_RELAY_URL ??
-    deriveWsBase(
-      sessionBaseUrl !== ''
-        ? sessionBaseUrl
-        : typeof window !== 'undefined'
-          ? window.location.origin
-          : '',
-    );
-
-  return (): RelaySocket => {
+  return (): RelaySocket & { setup?: unknown } => {
     // Recorded handlers + a send queue so the proxy honours the narrator's
     // SYNCHRONOUS openRelay() contract while the mint+connect happens async.
     const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
@@ -47,9 +32,25 @@ export function createOpenRelay(opts?: {
     let realWs: WebSocket | undefined;
     let closed = false;
 
-    // Mint a token, then connect the real WS and bridge its events to the
-    // recorded handlers. Any failure fires `error` so the narrator REJECTS and
-    // the host stays silent (failure-silent, ADR 0007).
+    const proxy: RelaySocket & { setup?: unknown } = {
+      on(event, cb) {
+        (handlers[event] ??= []).push(cb);
+      },
+      send(data) {
+        // Tight cast at the typed-WS boundary (narrator sends JSON strings).
+        if (realWs && realWs.readyState === WebSocket.OPEN) realWs.send(data as string);
+        else sendQueue.push(data);
+      },
+      close() {
+        closed = true;
+        realWs?.close();
+      },
+      setup: undefined,
+    };
+
+    // Mint a token + setup envelope, then connect Google's Live WSS directly
+    // and bridge its events to the recorded handlers. Any failure fires `error`
+    // so the narrator REJECTS and the host stays silent (failure-silent, ADR 0007).
     void (async () => {
       const res = await fetchImpl(`${sessionBaseUrl}/live/session`, {
         method: 'POST',
@@ -59,10 +60,14 @@ export function createOpenRelay(opts?: {
       if (!res.ok) {
         throw new Error(`live session mint failed: ${res.status}`);
       }
-      const { token, model } = (await res.json()) as { token: string; model: string };
+      const response = (await res.json()) as SessionResponse;
+
+      // Populate `.setup` on the proxy BEFORE the WS fires `open` — the narrator
+      // reads `ws.setup` inside its open handler (Amendment C §C2.2 contract).
+      proxy.setup = response.setup;
 
       const ws = socketFactory(
-        `${relayWsBase}/live/relay?token=${encodeURIComponent(token)}&model=${encodeURIComponent(model)}`,
+        `${GOOGLE_LIVE_WSS}?access_token=${encodeURIComponent(response.token)}`,
       );
       ws.binaryType = 'arraybuffer'; // ensure binary frames arrive as ArrayBuffer, not Blob
       ws.addEventListener('open', () => {
@@ -85,19 +90,6 @@ export function createOpenRelay(opts?: {
       handlers.error?.forEach((cb) => cb(err));
     });
 
-    return {
-      on(event, cb) {
-        (handlers[event] ??= []).push(cb);
-      },
-      send(data) {
-        // Tight cast at the typed-WS boundary (narrator sends JSON strings).
-        if (realWs && realWs.readyState === WebSocket.OPEN) realWs.send(data as string);
-        else sendQueue.push(data);
-      },
-      close() {
-        closed = true;
-        realWs?.close();
-      },
-    };
+    return proxy;
   };
 }

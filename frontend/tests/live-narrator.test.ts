@@ -2,18 +2,44 @@ import { describe, it, expect } from "vitest";
 import { createLiveNarrator } from "../src/lib/live-narrator";
 
 // The FE narrator generalizes today's fire-and-forget `speak.ts` into the async,
-// lifecycle-aware `VoiceNarrator` over the live-voice relay (ADR 0007 §2/§4/§7).
-// `openRelay()` is the injectable I/O edge — the real impl mints an ephemeral token
-// via `POST /live/session` then opens the relay WS; tests inject a duck-typed fake
-// (WS-like: on/send/close). This first cycle pins ONLY the forward contract: on the
-// socket's `open`, the narrator sends EXACTLY ONE `clientContent` turn carrying the
-// line wrapped in the "speak only these exact words" guard, and — because the relay
-// owns setup (§4/§7) — NEVER sends a `setup` frame. Audio playback, promise
-// resolution on drain, failure-silent degrade, and cost-gating are later cycles.
+// lifecycle-aware `VoiceNarrator` over the Gemini Live WSS (ADR 0007 §2/§4/§7 +
+// Amendment C). Topology is RESOLVED → (a) browser-direct: the FE opens Google's Live
+// WSS itself, so the narrator now OWNS the connection and sends the `setup` frame
+// ITSELF (the retired relay used to). `openRelay()` is the injectable open-edge — the
+// real impl is a SYNCHRONOUS deferred-proxy: it returns a WS-like socket IMMEDIATELY,
+// then asynchronously mints an ephemeral token + fetches the server-built `setup` via
+// `POST /live/session` and opens the Google WSS. So `setup` is NOT known at call-time —
+// it only exists by the time the socket fires `open`. Per Amendment C §C2.2 the returned
+// socket therefore CARRIES its own `.setup` (read at OPEN-time), NOT a `{ socket, setup }`
+// wrapper destructured at call-time (which would hand the narrator `setup === undefined`
+// in a real browser — the LV1-D1 trap). The narrator reads `ws.setup` inside its `open`
+// handler, where BOTH the sync fake AND the real async proxy have populated it. The
+// `setup` is the FULLY-WRAPPED envelope the FE forwards VERBATIM — it does not build or
+// inspect it; `buildLiveSetup` on the backend stays the single source of truth (prefixed
+// model, AUDIO-only, no-spoiler systemInstruction). Tests inject a duck-typed fake socket
+// (WS-like: on/send/close) that carries a fake `.setup` envelope.
+
+// A shared fake of the server-built setup envelope `POST /live/session` returns
+// (`{ setup: buildLiveSetup({ model }) }`, §C2.1). The narrator forwards exactly these
+// bytes; the test does not assert its internals (the backend test pins the shape).
+const SETUP = {
+  setup: {
+    model: "models/gemini-3.1-flash-live-preview",
+    generationConfig: { responseModalities: ["AUDIO"] },
+    systemInstruction: { parts: [{ text: "no spoilers" }] },
+  },
+};
+
 describe("createLiveNarrator", () => {
-  it("sends exactly one wrapped clientContent turn on open and never a setup frame", () => {
-    // Arrange: a fake relay socket that captures its event handlers (so the test can
-    // fire `open`) and records every send(data).
+  it("sends the setup frame first, then the wrapped clientContent turn, on open", () => {
+    // Arrange: a fake open-edge whose returned value IS the WS-like socket and CARRIES
+    // its own `.setup` (no `{ socket, setup }` wrapper). The socket captures its event
+    // handlers (so the test can fire `open`) and records every send(data); SETUP is the
+    // server-built envelope the narrator forwards verbatim, read off `ws.setup` at OPEN
+    // time. The real `openRelay` is a synchronous deferred-proxy that returns immediately
+    // and fetches `POST /live/session` asynchronously, so `setup` only exists by the time
+    // `open` fires — reading `ws.setup` in the open handler is the contract that BOTH this
+    // sync fake AND the real async proxy satisfy (avoids the LV1-D1 destructure-at-call trap).
     const handlers: Record<string, (...args: unknown[]) => void> = {};
     const sent: unknown[] = [];
     const fakeWs = {
@@ -24,50 +50,45 @@ describe("createLiveNarrator", () => {
         sent.push(data);
       },
       close() {},
+      setup: SETUP,
     };
 
-    // Act: speak a line over the injected relay, then fire the socket's `open`. We do
-    // NOT await speak(): its promise resolves on audio drain (a later cycle). The relay
-    // is opened synchronously by speak(); the wrapped turn is emitted on `open`.
-    const narrator = createLiveNarrator({ openRelay: () => fakeWs });
+    // Act: speak a line over the injected open-edge, then fire the socket's `open`. We
+    // do NOT await speak(): its promise resolves on audio drain (a later cycle). The
+    // socket is opened synchronously by speak(); both frames are emitted on `open`.
+    const narrator = createLiveNarrator({
+      openRelay: () => fakeWs,
+    });
     void narrator.speak("go");
     handlers.open?.();
 
-    // A send may be a JSON string (wire form) or a raw object — normalize before
-    // asserting so the contract (the payload), not its serialization, is pinned.
+    // Assert (Amendment C §C2.3): on `open` the narrator sends EXACTLY TWO frames, in
+    // order — the socket's own `setup` envelope VERBATIM first, then the clientContent
+    // line turn. Frame 1 is the literal `JSON.stringify(ws.setup)` bytes (forwarded from
+    // the socket, never rebuilt). This INVERTS the retired "never sends a setup frame"
+    // assertion — under browser-direct the browser owns the connection and MUST send setup.
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toBe(JSON.stringify(SETUP));
+
+    // Frame 2 is the line wrapped in the exact guard prompt. A send may be a JSON string
+    // (wire form) or a raw object — normalize before asserting the payload.
     const asObject = (data: unknown): unknown =>
       typeof data === "string" ? JSON.parse(data) : data;
-    const frames = sent.map(asObject);
-
-    // Assert: exactly one frame, and it is the line wrapped in the exact guard prompt.
-    expect(frames).toEqual([
-      {
-        clientContent: {
-          turns: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: 'Speak only these exact words. Do not add anything. Say: "go"',
-                },
-              ],
-            },
-          ],
-          turnComplete: true,
-        },
+    expect(asObject(sent[1])).toEqual({
+      clientContent: {
+        turns: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: 'Speak only these exact words. Do not add anything. Say: "go"',
+              },
+            ],
+          },
+        ],
+        turnComplete: true,
       },
-    ]);
-
-    // Assert the invariant: the narrator never owns/sends setup — no frame carries a
-    // top-level `setup` key (the relay mints it; ADR 0007 §4/§7).
-    expect(
-      frames.some(
-        (frame) =>
-          typeof frame === "object" &&
-          frame !== null &&
-          "setup" in (frame as Record<string, unknown>),
-      ),
-    ).toBe(false);
+    });
   });
 
   it("routes each inbound serverContent audio part to the injected audio sink", () => {
@@ -82,6 +103,7 @@ describe("createLiveNarrator", () => {
       },
       send() {},
       close() {},
+      setup: SETUP,
     };
     const played: string[] = [];
     const fakeAudio = {
@@ -131,6 +153,7 @@ describe("createLiveNarrator", () => {
       },
       send() {},
       close() {},
+      setup: SETUP,
     };
     const played: string[] = [];
     const fakeAudio = {
@@ -179,6 +202,7 @@ describe("createLiveNarrator", () => {
       },
       send() {},
       close() {},
+      setup: SETUP,
     };
     const played: string[] = [];
     const audioResolvers: Array<() => void> = [];
@@ -252,6 +276,7 @@ describe("createLiveNarrator", () => {
       },
       send() {},
       close() {},
+      setup: SETUP,
     };
     const played: string[] = [];
     const fakeAudio = {
@@ -303,6 +328,7 @@ describe("createLiveNarrator", () => {
       close() {
         closeCalls++;
       },
+      setup: SETUP,
     };
     const played: string[] = [];
     const audioResolvers: Array<() => void> = [];
@@ -354,16 +380,20 @@ describe("createLiveNarrator", () => {
 
   it("opens zero relays when held and exactly one relay per speak call", () => {
     // Arrange: a COUNTING openRelay — each call increments `opens` and returns a fresh
-    // fake WS. This pins the cost-gating / silence-budget invariant structurally: merely
-    // constructing/holding a VoiceNarrator must open NOTHING, and a relay WS is opened
-    // ONLY inside a speak(...) call — exactly one per speak, never a shared/persistent
-    // socket (the "no storm" / no-continuous-session guarantee; ADR 0007 §5/§8).
+    // socket-with-`.setup` (the Amendment C §C2.2 open-edge shape: the returned value IS
+    // the WS-like socket, carrying its own `setup`). This pins the cost-gating / silence-
+    // budget invariant structurally: merely constructing/holding a VoiceNarrator must open
+    // NOTHING, and the Google socket is opened ONLY inside a speak(...) call — exactly one
+    // per speak, never a shared/persistent socket (the "no storm" / no-continuous-session
+    // guarantee; ADR 0007 §5/§8). Carrying `.setup` on the socket does not change the
+    // count — still one per speak.
     let opens = 0;
     const makeFakeWs = (): {
       on(): void;
       send(): void;
       close(): void;
-    } => ({ on() {}, send() {}, close() {} });
+      setup: typeof SETUP;
+    } => ({ on() {}, send() {}, close() {}, setup: SETUP });
     const openRelay = (): ReturnType<typeof makeFakeWs> => {
       opens++;
       return makeFakeWs();

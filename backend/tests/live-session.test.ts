@@ -172,4 +172,58 @@ describe("POST /live/session", () => {
     // The env override — not the bare default — is what the route reports as `model`.
     expect(body.model).toBe(OVERRIDE_MODEL);
   });
+
+  it("returns the server-built setup envelope so the browser-direct FE can forward it verbatim", async () => {
+    // BROWSER-DIRECT pivot (ADR 0007 Amendment C): the BROWSER now opens Google's
+    // Live WSS itself and sends the `setup` frame. To keep that frame SERVER-built
+    // (not client-tampered — spoiler-safety + audio-only stay non-negotiable), the
+    // route returns the FULLY-WRAPPED envelope additively alongside { token, model,
+    // expiresAt }: `setup` = { setup: buildLiveSetup({ model }) }, so the FE forwards
+    // `response.setup` verbatim onto the wire. `buildLiveSetup` (live-setup.ts) stays
+    // the single source of truth — these load-bearing fields are pinned in
+    // live-setup.test.ts; here we only prove the route surfaces that output, wrapped.
+    //
+    // TRIPWIRE: this FAILS if the route returns the bare { token, model, expiresAt }
+    // (no `setup`), or hand-rolls a setup frame that drops the `models/` prefix or
+    // mixes a non-AUDIO modality — the FE would then send a tampered/broken frame.
+    const liveMint = {
+      mintToken: async () => ({ token: "ephemeral-setup", expiresAt: "2026-06-02T23:30:00.000Z" }),
+    };
+    const app = buildApp({ liveMint });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/live/session",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // The response carries the WRAPPED setup envelope: `setup.setup` is the
+    // buildLiveSetup output. Guard the nested access (noUncheckedIndexedAccess),
+    // mirroring live-setup.test.ts — a missing envelope reads as the absent
+    // server-built frame, not an incidental property-access crash.
+    const body = res.json() as {
+      setup?: {
+        setup?: {
+          model?: string;
+          generationConfig?: { responseModalities?: string[] };
+          systemInstruction?: { parts?: Array<{ text?: string }> };
+        };
+      };
+    };
+    const setup = body.setup?.setup;
+
+    // §2: the model id is PREFIXED with `models/` — the bare-default
+    // `gemini-3.1-flash-live-preview` (env override cleared by beforeEach) becomes
+    // `models/gemini-3.1-flash-live-preview` on the wire.
+    expect(setup?.model).toBe("models/gemini-3.1-flash-live-preview");
+
+    // §2: output is AUDIO-ONLY — EXACTLY ["AUDIO"], never ["AUDIO","TEXT"].
+    expect(setup?.generationConfig?.responseModalities).toEqual(["AUDIO"]);
+
+    // §spoiler-safety: the server-built systemInstruction encodes the no-spoiler
+    // rule (mirrors live-setup.test.ts) — proving the FE can't strip it.
+    expect(setup?.systemInstruction?.parts?.[0]?.text).toMatch(/spoil/i);
+  });
 });

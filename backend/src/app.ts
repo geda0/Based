@@ -5,7 +5,6 @@ import { registerNarrateRoutes, type GeminiClient } from "./modules/narrate/narr
 import { createGeminiClient } from "./modules/narrate/gemini-client.js";
 import { registerLiveRoutes, type LiveTokenClient } from "./modules/live/live.routes.js";
 import { createLiveTokenClient } from "./modules/live/live-token-client.js";
-import { registerLiveRelayRoute } from "./modules/live/live-relay.routes.js";
 
 // App factory so tests build an instance and use app.inject() — no real network.
 // Gemini + the live mint client are injectable so tests stub them; each defaults
@@ -22,6 +21,5 @@ export function buildApp(opts?: { gemini?: GeminiClient; liveMint?: LiveTokenCli
   const gemini = opts?.gemini ?? createGeminiClient();
   registerNarrateRoutes(app, gemini);
   registerLiveRoutes(app, opts?.liveMint ?? createLiveTokenClient());
-  registerLiveRelayRoute(app);
   return app;
 }
