@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { App } from "../src/App.js";
 import { events } from "../src/mocks/event-graph";
 
@@ -30,7 +30,7 @@ describe("App", () => {
     );
   });
 
-  it("wakes the host into the speaking state when the feed fires a hot event", async () => {
+  it("routes the surfacing event through the injected narrate client and wakes the host into the speaking state", async () => {
     // The host loop's speak side-effect defaults to window.speechSynthesis, which
     // jsdom lacks — stub the Web Speech surface so the character can speak without
     // crashing the environment.
@@ -46,14 +46,80 @@ describe("App", () => {
       },
     );
 
-    render(<App />);
+    // M3: the host's utterance must come from the /narrate client, not a canned line.
+    // Inject a stub that records calls (proving cost-gated narration fired) and
+    // resolves a known line for the character to speak.
+    const narrateCalls: unknown[] = [];
+    const narrate = async (i: unknown) => {
+      narrateCalls.push(i);
+      return "the Major just turned — watch this";
+    };
+
+    render(<App narrate={narrate} />);
 
     // The first mock event (heatDelta 0.91) clears the default surfaceThreshold and
-    // fires at ts: 1. Advance fake time past it and flush React state from the bus.
-    await vi.advanceTimersByTimeAsync(100);
+    // fires at ts: 1. Advance fake time past it; the async narrate resolves within
+    // the flush (no waitFor under fake timers).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
 
-    // The host woke: a hot event from the feed drove the loop's `speak` directive
-    // into the character.
+    // M3 load-bearing assertion: a surfacing event routed through the /narrate client
+    // (cost-gated — only fires because the loop surfaced, not on the idle firehose).
+    expect(narrateCalls.length).toBeGreaterThanOrEqual(1);
+
+    // The host woke: the hot event drove a `speak` directive — now on the narrated
+    // line — into the character.
     expect(screen.getByRole("status")).toHaveTextContent(/speaking/i);
+  });
+
+  it("keeps /narrate calls bounded on the default client path, never storming on re-render (cost-gating)", async () => {
+    // D1 regression: <App/> with NO narrate prop must use the real default
+    // createNarrateClient() — the production path. The cost-gating invariant has
+    // to hold there too: a surfacing event spends ONE LLM call, never a storm.
+    // (The existing cost-gating unit test injects a STABLE client, so it never
+    // exercised the default-client identity churn that drives the storm.)
+    vi.useFakeTimers();
+    vi.stubGlobal("speechSynthesis", { speak: () => {}, cancel: () => {} });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    // Stub global fetch so the default client's /narrate POST records each call
+    // and resolves a valid { utterance } the character can speak.
+    const narrateCalls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (String(url).includes("/narrate")) narrateCalls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({ utterance: "a short test line" }),
+      } as Response;
+    });
+
+    // No narrate prop → the real default createNarrateClient() (the buggy path).
+    render(<App />);
+
+    // Advance ~3s of feed time across several flush turns. Only the first mock
+    // event (ts: 1, heatDelta 0.91) surfaces in this window — events 2/3 fire at
+    // ts 45000/90000. Each turn pumps the render cascade; no waitFor under fake
+    // timers. Separate turns matter: D1's storm escalates per render turn (the
+    // effect re-subscribes the bus + re-arms the feed every re-render), so a
+    // single advanceTimersByTimeAsync would collapse the window and mask it.
+    for (let i = 0; i < 30; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+    }
+
+    // Cost-gating: one surfacing event in 3s = at most one /narrate call (+1
+    // headroom). The D1 storm re-fires the ts:1 feed timer on every re-render,
+    // driving this far higher (one call per render turn).
+    expect(narrateCalls.length).toBeLessThanOrEqual(2);
   });
 });
