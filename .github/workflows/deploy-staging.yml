@@ -1,0 +1,58 @@
+name: Deploy staging
+
+# Auto-deploy Based staging on every push to main (or on manual dispatch).
+# Auth is keyless: the job assumes the based-staging-ci-deploy IAM role via
+# GitHub OIDC (no AWS secrets stored in GitHub). The Gemini key is NOT needed —
+# infra/deploy-staging.sh reuses the existing SSM SecureString.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Never run two staging deploys at once; let an in-flight deploy finish.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+# id-token: write is required for the OIDC token; contents: read for checkout.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The gate: typecheck + lint + full test suite. Never deploy a red bar.
+      - name: Verify
+        run: pnpm verify
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::429844072978:role/based-staging-ci-deploy
+          aws-region: us-east-2
+
+      - name: Deploy staging
+        run: bash infra/deploy-staging.sh
+        env:
+          AWS_REGION: us-east-2
