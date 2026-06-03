@@ -20,10 +20,13 @@ step "Deploying Based staging  |  account $ACCOUNT  |  region $REGION  |  tag $I
 
 # Gemini key -> SSM SecureString. Sourced from backend/.env (gitignored) or the
 # environment; the value is never printed or passed to CloudFormation (only its ARN is).
-# GEMINI_MODEL (non-secret) is single-sourced from the version-controlled IaC default in
-# infra/staging.yaml: we only pass a parameter-override when backend/.env (or the env)
-# actually provides one (local override). CI has no backend/.env, so it gets the IaC
-# default — no hardcoded model id in this script to drift. See ADR 0005.
+# GEMINI_MODEL (non-secret) is single-sourced from the version-controlled IaC default
+# (the `Default:` of GeminiModel in infra/staging.yaml). backend/.env (or the env) may
+# OVERRIDE it locally; CI (no backend/.env) gets the IaC default. We ALWAYS pass
+# GeminiModel to CloudFormation: an omitted parameter on a stack UPDATE retains the
+# stack's previous value (NOT the template default), so the value must be explicit to
+# converge the stack onto the IaC default — that retain-previous behaviour was the m3
+# CI model gap. No hardcoded model id in this script. See ADR 0005.
 SSM_NAME="/based/staging/gemini-api-key"
 if [ -f backend/.env ]; then set -a; . ./backend/.env; set +a; fi
 step "0/5  Gemini API key -> SSM SecureString ($SSM_NAME)"
@@ -39,13 +42,20 @@ fi
 GEMINI_SSM_ARN="$(aws ssm get-parameter --name "$SSM_NAME" --region "$REGION" --query 'Parameter.ARN' --output text)"
 echo "    arn: $GEMINI_SSM_ARN"
 
-# Single-source GEMINI_MODEL: override the IaC default only if backend/.env / env set it.
-MODEL_OVERRIDE=()
-if [ -n "${GEMINI_MODEL:-}" ]; then
-  MODEL_OVERRIDE=("GeminiModel=$GEMINI_MODEL")
-  echo "    model: $GEMINI_MODEL  (override from backend/.env or env)"
+# Single-source GEMINI_MODEL from the version-controlled IaC default (GeminiModel's
+# `Default:` in infra/staging.yaml). backend/.env / env OVERRIDES it; CI uses the IaC
+# default. Always passed to CloudFormation (an omitted param on update retains the
+# stale stack value — the m3 gap).
+IAC_MODEL_DEFAULT="$(awk '/^  GeminiModel:/{f=1} f&&/^    Default:/{print $2; exit}' infra/staging.yaml)"
+if [ -z "$IAC_MODEL_DEFAULT" ]; then
+  echo "ERROR: could not read GeminiModel Default from infra/staging.yaml." >&2
+  exit 1
+fi
+if [ -n "${GEMINI_MODEL:-}" ] && [ "$GEMINI_MODEL" != "$IAC_MODEL_DEFAULT" ]; then
+  echo "    model: $GEMINI_MODEL  (override from backend/.env or env; IaC default is $IAC_MODEL_DEFAULT)"
 else
-  echo "    model: <IaC default from infra/staging.yaml>  (no GEMINI_MODEL in env/backend/.env)"
+  GEMINI_MODEL="$IAC_MODEL_DEFAULT"
+  echo "    model: $GEMINI_MODEL  (IaC default from infra/staging.yaml)"
 fi
 
 step "1/5  ECR repository (CloudFormation: $ECR_STACK)"
@@ -73,7 +83,7 @@ step "3/5  Infrastructure stack (CloudFormation: $MAIN_STACK) — CloudFront + A
 aws cloudformation deploy \
   --stack-name "$MAIN_STACK" \
   --template-file infra/staging.yaml \
-  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "${MODEL_OVERRIDE[@]+"${MODEL_OVERRIDE[@]}"}" \
+  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "GeminiModel=$GEMINI_MODEL" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \
   --no-fail-on-empty-changeset
