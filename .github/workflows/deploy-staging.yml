@@ -28,10 +28,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm version comes from package.json "packageManager" (pnpm@9.0.0).
+      # Passing an explicit version: here conflicts with that and errors.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Set up Node
         uses: actions/setup-node@v4
