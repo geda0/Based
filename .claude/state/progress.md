@@ -4,24 +4,45 @@ _Updated by the orchestrator every cycle. Cold-start source of truth — read it
 `design-notes.md` + `backlog.md`) before doing anything, then run `pnpm verify`._
 
 ## Current feature
-**M3 · Real Gemini narration** — `POST /narrate` proxy + FE integration. Backend-first,
-seam-touching → **architect consult REQUIRED at DESIGN** before the first RED. See
-`design-notes.md` (M3-scoped) + `backlog.md`. Scope/invariants: ADR 0003/0004.
+**LV1 · live-voice host (BUILD, in progress)** — swap M3's Web-Speech TTS for native
+`gemini-3.1-flash-live-preview` audio over the Live WSS API. DESIGN done (ADR 0007, topology
+RESOLVED). Building **backend-first against a stubbed upstream socket**. See `design-notes.md`
+(LV1 KICKOFF — 12 unit-TDD + 3 qa bullets, 14-step cycle order) + `backlog.md`. Invariants: ADR 0003/0006/0007.
 
 ## Status
-- **Milestone:** **LV1 · live-voice host — DESIGN done** (ADR `0007-live-voice-seam`). Replaces M3's text+Web-Speech with `gemini-3.1-flash-live-preview` over the **Live WSS API** (native streamed audio; resolves §13 voice identity). Architect chose **(a) ephemeral-token + browser-direct WSS** (new `POST /live-token` mints a short-lived scoped token — long-lived key never in the browser); fallback **(b)** backend WSS relay. **§6 contracts + host loop UNCHANGED** — `speak()` generalizes to async `VoiceNarrator`; a `live-narrator` owns the audio session behind the existing injectable seam. M0–M3 released (`m2`,`m3`).
-- **Layer:** — (between DESIGN and BUILD; BUILD starts **backend** at `red` after the gate + PO KICKOFF)
-- **Phase:** — (feature boundary)
-- **Suite:** green — `pnpm verify`=0 (backend 7/7, frontend 24/24, e2e skipped).
-- **Blocker (LV1 topology GATE):** confirm whether `gemini-3.1-flash-live-preview` supports **ephemeral tokens** + the Live WSS endpoint/audio-format (ADR 0007 flagged these for BUILD). **Yes → topology (a); No → fallback (b)** backend relay (re-sequence per ADR). Needs a research/validation step (or navigator confirmation, since they own the Gemini account) before the first RED.
-- ⚠ **CI deploy gap (still open):** `deploy-staging.sh` reads `GEMINI_MODEL` from gitignored `backend/.env` → CI ships the fallback. Sync `GEMINI_MODEL` to SSM **before LV1's release** (LV1 changes the model id again).
+- **Milestone:** **LV1 · live-voice host — BUILD (in progress)** (ADR `0007-live-voice-seam`, topology RESOLVED). Replaces M3's text+Web-Speech with `gemini-3.1-flash-live-preview` over the **Live WSS API** (native streamed audio; resolves §13 voice identity). **Topology GATE CLOSED** via the navigator's reference repo `github.com/geda0/gvp`: resolved to **(b) backend WSS relay** — browsers can't set the `Authorization: Token` header the Live WSS needs, so the server mints a short-lived ephemeral token AND a backend relay opens the upstream socket (browser → relay → Google). Topology (a) browser-direct (`?access_token=`) exists in gvp but is disabled (Google close 1011). **§6 contracts + host loop UNCHANGED** — `speak()` generalizes to async `VoiceNarrator`; new backend `POST /live/session` (mint) + WSS relay; FE `live-narrator` (WS + AudioContext PCM). M0–M3 released (`m2`,`m3`).
+- **Layer:** backend
+- **Phase:** (between cycles — backend mint module COMPLETE + critic-hardened; next layer = backend RELAY)
+- **Suite:** green — `pnpm verify`=0 (backend **7 files / 15 tests**, frontend 25/25, e2e 1 skipped, typecheck+lint clean). HEAD `ce194e7`; LV1 work is **local/uncommitted** (release infra-gated → navigator-approved ECS Express Mode).
+- **LV1 BUILD progress** (against stubbed upstream; suite is the seam):
+  - ✅ **cycle 1 — `buildLiveSetup` wire shape** (`backend/src/modules/live/live-setup.ts`): prefixed model id `models/gemini-3.1-flash-live-preview` + audio-only `responseModalities:['AUDIO']` (the two load-bearing Live facts; mixed modalities silently hang). GREEN.
+  - ✅ **cycle 2 — `buildLiveSetup` systemInstruction**: persona + no-spoiler rule (spoiler-safety defense-in-depth). GREEN. **`buildLiveSetup` builder now complete.** (DRY: persona text duplicated with `narrate.prompt.ts` → shared-constant refactor later.)
+  - ✅ **cycle 3 — `POST /live/session` mint (happy path)**: route + injected `liveMint.mintToken()` → `200 {token, model(bare), expiresAt}`; long-lived key never echoed (architect token-flow = **option B**, ADR 0007 Amendment). GREEN. + a test type-fix.
+  - ✅ **cycle 4 — `/live/session` malformed→400 no-spend**: local zod `z.object({}).passthrough()` (ignores unknown keys); safeParse→400 before mint. GREEN.
+  - ✅ **cycles 5–6 — `createLiveTokenClient` secrets-from-env**: (5) env-only sourcing via injectable `MintFn` (real `@google/genai` DEFERRED as a throwing `defaultMint` — the untested I/O edge); (6) rejects + no-spend if `GEMINI_API_KEY` absent (`as string` cast removed). GREEN.
+  - ✅ **cycle 7 (refactor-hardening, post-critic)**: route-level secrets tripwire (bogus body key ignored + long-lived key never echoed, positive-control non-vacuous), `GEMINI_LIVE_MODEL` override coverage, env-leak fix. GREEN.
+  - ✅ **tdd-critic (after cycle 6) = PASS w/ follow-ups**: HIGH route-secrets-tripwire → CLOSED in cycle 7; MEDIUM model-override + env-leak → CLOSED; deferred items → see RELEASE-PREP below.
+  - **✅ BACKEND MINT MODULE COMPLETE** (`buildLiveSetup` + `POST /live/session` + `createLiveTokenClient`): secrets-from-env proven at **client + route**, malformed→400 no-spend, audio-only setup frame. 15 tests / 7 files.
+  - ▶ **NEXT — the WSS RELAY** (KICKOFF #5–6): attaches `Authorization: Token <ephemeral>` + sends `setup` ONCE (stubbed upstream socket); forwards `clientContent` + pipes `serverContent` PCM back. Needs a WS-upgrade dep (`@fastify/websocket`). Then FE `VoiceNarrator` (#7–10) → integration (#11) → tdd-critic → qa (audible) → PO accept → release.
+  - ⚠ **harness gap (recurring):** the run-suite hook runs vitest ONLY, not typecheck/lint — type errors slip past GREEN until `pnpm verify`. Mitigation: `pnpm verify` each cycle (doing this). Durable fix (→ POLISH): run-suite also `tsc --noEmit` the layer.
 
-## Staging demo-quality follow-ups — from the navigator's staging screenshot
-- ✅ **EMBED-TWITCH-PARENT — FIXED (local, green):** Player appends `parent=<window.location.hostname>` only for `player.twitch.tv` (ADR 0008; ADR 0003 #5 amended — required platform params allowed, still no rehost). Real Twitch ids will now render.
-- ✅ **SPOILER-HARDENING — FIXED (local, green):** rail label = `` `${type} · ${streamer}` `` via the shared `topVantage` (extracted to `frontend/src/lib/top-vantage.ts`), never the outcome-bearing narrative (ADR 0009 — **resolves §13 spoiler-across-surfaces**). No rail label leaks an outcome. (25 FE tests; `pnpm verify`=0.)
+## LV1 RELEASE-PREP — untested I/O edges to WIRE before qa + staging release
+Deliberately deferred "untested edges" (like M3's gemini-client `fetch`); the suite STUBS them. **Must be wired + qa-verified before LV1 qa/release:**
+- **`@google/genai` mint** — `defaultMint` in `live-token-client.ts` throws "not wired"; add the dep + implement `authTokens.create` (`api_version:'v1alpha'`, `uses:1`, ~3-min open window). _(critic item 5)_
+- **The relay's real upstream socket** — once the relay is built, wire the real Google Live WSS upstream (header `Authorization: Token`).
+- **The FE real `AudioContext` + relay WS** — real Web-Audio PCM playback + real relay URL (`VITE_LIVE_RELAY_URL`).
+- **ECS Express Mode relay host** (navigator-approved) — dev-ops stands up at release; ALB idle-timeout ~3600s + app-level WS pings; migrate-whole-backend vs separate-relay-service = PM/dev-ops call at release.
+- **Deferred critic follow-ups (non-blocking):** item 2 — no-key-in-**LOGS** assertion (cross-cutting `/narrate`+`/live/session`; needs a capturing-logger helper; M3-inherited gap); item 6 — DRY persona dup in `live-setup.ts`↔`narrate.prompt.ts` (reviewed, intentionally deferred — the strings legitimately differ in register).
+- **✅ INFRA DECISION — RESOLVED (navigator approved 2026-06-02):** **"Full LV1 + approve relay infra."** The WSS relay **cannot run on App Runner** (no inbound WebSocket; non-configurable 120s timeout; stateless; *and App Runner is closed to new customers / sunsetting*). → Stand up a small **ECS Express Mode** service (Fargate + auto-ALB) for the relay — reuses our ECR image + OIDC deploy, ~$25–30/mo, ~½ day, additive; doubles as the AWS-recommended App Runner migration path. **Queued for the RELEASE phase** (architect records hosting design → dev-ops scaffolds), AFTER the LV1 cycles are green — kept OUT of the inner loop to avoid shared phase/suite-status hook entanglement. LV1 BUILD proceeds now against a local/stubbed relay.
+- **▶ Token-flow BUILD fork (ADR 0007 §7, "record at BUILD") — architect to resolve now (suite green):** does `POST /live/session` return the short-lived **ephemeral token** to the FE (FE hands it to the relay), or does the relay mint/hold it server-side (gvp-style session correlation), or mint on WS-upgrade? Decides the mint route's response contract (cycle 3). Long-lived `GEMINI_API_KEY` stays server-side in ALL options (the actual invariant); the choice is about the short-lived token's path + testability. Architect picks + appends to ADR 0007 before cycle 3's RED.
+- ✅ **CI deploy gap — CLOSED** (`GEMINI_MODEL` now IaC-sourced in `infra/staging.yaml`, CI-proven on `ce194e7`). Model-id changes (incl. LV1's `gemini-3.1-flash-live-preview`) are CI-safe — just bump the `staging.yaml` default in the milestone commit.
+
+## Staging demo-quality — embed fixes DEPLOYED ✅ (from the navigator's staging screenshot)
+- ✅ **EMBED-TWITCH-PARENT — FIXED + DEPLOYED:** Player appends `parent=<window.location.hostname>` only for `player.twitch.tv` (ADR 0008; ADR 0003 #5 amended — required platform params allowed, still no rehost). The `[NoParent]` error is gone; real Twitch ids will now render.
+- ✅ **SPOILER-HARDENING — FIXED + DEPLOYED:** rail label = `` `${type} · ${streamer}` `` via the shared `topVantage` (`frontend/src/lib/top-vantage.ts`), never the outcome-bearing narrative (ADR 0009 — **§13 spoiler-across-surfaces RESOLVED**). No on-screen outcome leak.
+- ✅ **CI `GEMINI_MODEL` gap — CLOSED + DEPLOYED** (`ce194e7`, CI-deployed): the model id is now the version-controlled `infra/staging.yaml` default (`gemini-3.1-flash-lite`) and `deploy-staging.sh` always passes it (fixing the CFN "omitted param keeps stale value" gotcha) → CI ships the right model with no `.env`. Staging `GEMINI_MODEL=gemini-3.1-flash-lite`, `/narrate` smoke green. **Model-id changes are now CI-safe** (LV1 just bumps the `staging.yaml` default). Release log refreshed.
 - **PLACEHOLDER-EMBEDS (demo-prep, open):** real Twitch/Kick channel ids (`EXAMPLE_*` are fake) — a content call at demo time (§13 Rights/ToS). With the parent fix, real Twitch ids now render.
-- ⚠ **EMBED FIXES NOT YET DEPLOYED (local + uncommitted):** a push auto-triggers CI → `deploy-staging.sh` → re-ships the WRONG `GEMINI_MODEL` (the CI gap) → would regress M3 narration on staging. So **fix the CI `GEMINI_MODEL`→SSM gap BEFORE pushing/deploying** (or do a manual deploy). The fixes can ride with LV1's release (which needs the CI fix anyway) or a dedicated patch.
-- §13 remaining (pre-external-demo): **tier-hedging** wording. Voice identity → resolving via LV1.
+- §13 remaining (pre-external-demo): **tier-hedging** wording. Voice identity → resolving via LV1. Tracked: Node 20→24 CI runner deprecation (due 2026-06-16).
 
 ## qa defects — M3 (ALL FIXED ✅ + unit-covered; re-qa pending)
 _D1 ✅ stable module-level narrate client → no storm (regression test on the DEFAULT-client path: 1 call). D2 ✅ `dev` = `tsx watch --env-file=.env …` (env loads). D3 ✅ empty/whitespace utterance → no-speak (`narrating-host-loop.ts`). 24 FE + 7 BE tests, `pnpm verify`=0. Original detail below._

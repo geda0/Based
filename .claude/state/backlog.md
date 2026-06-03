@@ -7,13 +7,26 @@ logged with a one-line rationale. Acceptance criteria are layer-tagged and tied 
 the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Now (in flight)
-- _(none — M3 PO-accepted 2026-06-02; next milestone selected below: **LV1 · Live-voice host**.
-  Orchestrator note: the `m3` RELEASE step — PM + dev-ops commit/tag `m3` + deploy to staging + verify
-  health → `releases.md` — runs in parallel per the PM cadence; not a PO gate.)_
+- **LV1 · Live-voice host** — **DESIGN done (ADR 0007, topology → (b) backend WSS relay); LV1 KICKOFF
+  written into `design-notes.md` (2026-06-02).** Status flips `todo → in-progress`. 12 unit-TDD bullets
+  (backend mint ×4, relay/setup ×3, frontend VoiceNarrator ×4, integration ×1) + 3 qa-only bullets; first
+  RED = the pure `buildLiveSetup(...)` setup-frame builder `[backend]`. **It is a transport swap behind the
+  existing speak path** — host loop, cost-gating, §6 contracts, and the `/narrate` text path are UNCHANGED.
+  **⚠ Staging deploy of LV1 is infra-gated** (relay needs a persistent-WebSocket host — escalated below); BUILD
+  proceeds against a local/stubbed relay regardless. _(Orchestrator note: the `m3` RELEASE — PM + dev-ops
+  commit/tag `m3` + deploy + verify health → `releases.md` — runs in parallel per the PM cadence; not a PO gate.)_
 
 ## Next (prioritized)
 
-### LV1 · Live-voice host — `gemini-3.1-flash-live-preview` over the WebSocket Live API (native streaming audio) — `[backend]`→`[frontend]` — milestone: **post-M3 (navigator-chosen)** — priority: **NEXT, before M4** — status: **todo · SEAM-TOUCHING → architect DESIGN required**
+### LV1 · Live-voice host — `gemini-3.1-flash-live-preview` over the WebSocket Live API (native streaming audio) — `[backend]`→`[frontend]` — milestone: **post-M3 (navigator-chosen)** — priority: **NEXT, before M4** — status: **in-progress · DESIGN DONE (ADR 0007 — topology (b) backend WSS relay) · LV1 KICKOFF in `design-notes.md` · staging-deploy infra-gated (see Decisions needed)**
+  - **KICKOFF written (PO, 2026-06-02):** the full layer-tagged acceptance is now in `design-notes.md` (this
+    sketch below is retained as the rationale record). **12 unit-TDD bullets** (backend mint ×4 incl.
+    secrets-from-env; relay/setup ×3 incl. the pure `buildLiveSetup` builder, `Authorization: Token` + setup-once,
+    forward/pipe; frontend `VoiceNarrator` ×4 incl. failure-silent + cost-gating; integration ×1) + **3 qa-only
+    bullets** (audibly Gemini Live; spoken == on-screen safe utterance / no pre-cut spoiler; silence budget holds).
+    **First RED = the pure `buildLiveSetup(...)` setup-frame builder `[backend]`.** Transport/socket/`AudioContext`
+    are STUBBED in the suite. **It is a transport swap behind the existing speak path — host loop, cost-gating, §6
+    contracts, and the `/narrate` text path are UNCHANGED.**
   - **Rationale for sequencing (PO, 2026-06-02):** placed **ahead of M4** at the navigator's choosing.
     It directly advances the brief's §1 thesis — "a host with a face" / a *live conversation* — by
     replacing the robotic Web Speech voice with real streamed Gemini audio; it makes the existing
@@ -253,6 +266,19 @@ streamed-audio direction, so it moves out of "settled-for-now/external-demo gate
 rights** stay settled-for-now on the M2 defaults (re-attach at the first external demo) — kept for visibility.
 **Release note:** the two staging demo-blocker fixes (EMBED-TWITCH-PARENT, SPOILER-HARDENING) are **local +
 green but deploy-gated on the CI `GEMINI_MODEL`→SSM fix** — see "Deploy dependency" in the embed follow-ups._
+
+- **LV1 relay host — infra-scope: where does the WSS relay run?** **OPEN · escalated 2026-06-02 ·
+  release-gate, NOT a BUILD gate.** ADR 0007 topology (b) needs a **persistent-WebSocket-capable host** for the
+  relay; Based's backend runs on **AWS App Runner** (ADR 0005), whose support for **inbound WSS upgrade** is
+  unknown (gvp's reference runs its relay on ECS/Fargate + ALB and notes API Gateway/Lambda cannot upgrade the
+  browser WS). _Recommend:_ **(1)** first confirm whether **App Runner supports inbound WSS** (cheapest — co-host
+  the relay on the existing service; ADR 0005 gains a WSS health/route note); **(2)** if it does **not**, stand up
+  a **separate small persistent-socket WS service** running ONLY the relay (e.g. **ECS Express Mode / minimal
+  Fargate + ALB**), with the SPA pointing `VITE_LIVE_RELAY_URL` at it. **Either outcome leaves the FE seam and the
+  host loop UNCHANGED** (ADR 0007 §4/§7 — infra-placement only). **LV1 BUILD proceeds against a local/stubbed relay
+  regardless**; only the **staging deploy of LV1** waits on this. _Owner: navigator (infra-scope/new-compute call)
+  + dev-ops to research App Runner WSS + execute. **Needed by:** the LV1 staging release (not by the inner loop)._
+  [pending — escalated; recommended default above]
 
 - **Tier-aware hedging — how hard to hedge confidence tiers 2–4** (esp. IRL/breaking: highest
   spoiler + misinformation risk). **OPEN (shipped in M3 on the default; non-blocking).** _Recommend:_

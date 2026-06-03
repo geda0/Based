@@ -54,6 +54,17 @@ shell scripts in `infra/`:
 - **Security:** deploys currently use **root-account** access keys. Acceptable only
   for throwaway staging; before anything longer-lived, switch to a scoped IAM
   user/role and remove root access keys.
+- **LV1 follow-up (relay hosting — navigator-approved 2026-06-02; see ADR 0007 A2):**
+  the staging topology gains an **Amazon ECS Express Mode** relay service (Fargate +
+  auto-provisioned ALB, reusing the existing ECR image + OIDC deploy) for the
+  live-voice WSS relay — **App Runner cannot host it** (no inbound WebSocket; 120 s
+  request-timeout cap). FE + CloudFront and the App Runner `/narrate`/`/health` backend
+  stay as-is; the SPA points `VITE_LIVE_RELAY_URL` at the relay's ALB. Raise the ALB
+  idle timeout toward ~3600 s (+ app-level WS pings). **Forward-looking:** App Runner is
+  closed to new customers / sunsetting toward ECS Express Mode, so a later migration of
+  the whole backend off App Runner onto ECS Express Mode (single service) is on the
+  horizon — decided at the LV1 RELEASE phase (separate relay-only service vs. whole-backend
+  migration; ADR 0007 A2).
 
 ## Alternatives considered
 - **Serverless backend (S3 + CloudFront + Lambda + API Gateway).** Scales to zero
