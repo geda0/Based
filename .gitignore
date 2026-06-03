@@ -9,8 +9,17 @@ coverage/
 .env.*
 !.env.example
 
-# Transient TDD artifact (derived by the run-suite hook).
+# Throwaway live-API probes (read GEMINI_API_KEY from env; never committed).
+backend/scripts/
+
+# Transient TDD artifacts (derived per run — never commit). The OTHER state files
+# (plan.md / progress.md / design-notes.md / backlog.md / releases.md / phase / layer)
+# ARE committed for continuity.
 .claude/state/suite-status
+.claude/state/telemetry.jsonl
+
+# tdd-pairing merge-scratch sidecars (review, then merge into the real file).
+*.tdd-pairing.*
 
 # Playwright
 playwright-report/
@@ -19,3 +28,11 @@ test-results/
 # OS / editor
 .DS_Store
 *.local
+
+# >>> tdd-pairing (managed) >>>
+# Transient kit artifacts - never commit (other state files ARE committed for continuity).
+.claude/state/suite-status
+.claude/state/telemetry.jsonl
+.claude/**/*.bak
+*.tdd-pairing.*
+# <<< tdd-pairing (managed) <<<

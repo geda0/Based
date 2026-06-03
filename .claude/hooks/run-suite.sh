@@ -1,53 +1,36 @@
 #!/usr/bin/env bash
-# PostToolUse(Edit|Write|MultiEdit): run the active layer's suite, record status to
-# .claude/state/suite-status. Exit 2 on RED so the failure is fed back to the agent;
-# exit 0 on GREEN or when there is nothing to run.
+# run-suite.sh — PostToolUse (matcher: Edit|Write|MultiEdit)
+# The arbiter. Runs the ACTIVE LAYER's suite after an edit, records green/red,
+# surfaces the result, and appends one telemetry event per run (JSONL) so the
+# PROCESS can be measured (cycles, retries, durations, per-layer pass rates).
 set -uo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
+# shellcheck disable=SC1091
+. "$ROOT/.claude/hooks/lib.sh"
+mkdir -p "$ROOT/.claude/state"
+STATUS="$ROOT/.claude/state/suite-status"
+LAYER="$(cat "$ROOT/.claude/state/layer" 2>/dev/null || echo unknown)"
+PHASE="$(cat "$ROOT/.claude/state/phase" 2>/dev/null || echo unknown)"
+resolve_layer "$LAYER"
 
-ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-STATE="$ROOT/.claude/state"
-CONFIG="$ROOT/.claude/tdd.config"
+START="$(date +%s)"
+OUT="$(cd "$ROOT" && eval "$TEST_CMD" 2>&1)"; CODE=$?
+DUR=$(( $(date +%s) - START ))
 
-phase="$(tr -d '[:space:]' < "$STATE/phase" 2>/dev/null || true)"
-layer="$(tr -d '[:space:]' < "$STATE/layer" 2>/dev/null || true)"
-
-# Only run when a layer is active.
-[ -z "$layer" ] && exit 0
-
-# Skip when the edited file isn't in a code workspace (config/docs/state edits).
-input="$(cat)"
-fp="$(printf '%s' "$input" | node -e 'const fs=require("fs");let d="";try{d=fs.readFileSync(0,"utf8")}catch(e){}let p="";try{const j=JSON.parse(d);p=(j.tool_input&&(j.tool_input.file_path||j.tool_input.filePath))||""}catch(e){}process.stdout.write(String(p))' 2>/dev/null || true)"
-rel="${fp#"$ROOT"/}"
-case "$rel" in
-  backend/*|frontend/*|e2e/*) : ;;
-  *) exit 0 ;;
-esac
-
-# Resolve the layer's test command from tdd.config.
-# shellcheck disable=SC1090
-[ -f "$CONFIG" ] && . "$CONFIG"
-cmd=""
-case "$layer" in
-  backend)  cmd="${BE_TEST_CMD:-}" ;;
-  frontend) cmd="${FE_TEST_CMD:-}" ;;
-  e2e)      cmd="${E2E_TEST_CMD:-}" ;;
-esac
-[ -z "$cmd" ] && exit 0
-
-cd "$ROOT" || exit 0
-out="$(eval "$cmd" 2>&1)"; code=$?
-
-if [ "$code" -eq 0 ]; then
-  echo "green" > "$STATE/suite-status"
-  echo "SUITE GREEN ($layer): $cmd" >&2
-  exit 0
-fi
-
-echo "red" > "$STATE/suite-status"
-if [ "$phase" = "red" ]; then
-  echo "SUITE RED ($layer) — expected in red phase; confirm it fails for the RIGHT reason:" >&2
+if [ "$CODE" -eq 0 ]; then
+  echo "green" > "$STATUS"; RESULT="green"
+  echo "[OK] [$LAYER] SUITE GREEN — all tests pass."
 else
-  echo "SUITE RED ($layer) in '$phase' phase — must be fixed (or reverted) before stopping:" >&2
+  echo "red" > "$STATUS"; RESULT="red"
+  echo "[X] [$LAYER] SUITE RED (exit $CODE). Last ${TAIL_LINES:-40} lines:"
+  printf '%s\n' "$OUT" | tail -n "${TAIL_LINES:-40}"
 fi
-printf '%s\n' "$out" | tail -n 30 >&2
-exit 2
+
+# Telemetry (default on). One JSON object per line.
+if [ "${TELEMETRY:-1}" = "1" ]; then
+  TF="${TELEMETRY_FILE:-$ROOT/.claude/state/telemetry.jsonl}"
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"ts":"%s","event":"suite","layer":"%s","phase":"%s","result":"%s","exit":%s,"durationSec":%s}\n' \
+    "$TS" "$LAYER" "$PHASE" "$RESULT" "$CODE" "$DUR" >> "$TF" 2>/dev/null || true
+fi
+exit 0
