@@ -1,0 +1,14 @@
+# Keep the Docker build context small — the backend image only needs
+# tsconfig.base.json + backend/{package.json,tsconfig.json,src}.
+**/node_modules
+node_modules
+.git
+**/dist
+frontend
+e2e
+docs
+.claude
+infra
+pnpm-lock.yaml
+*.log
+.DS_Store

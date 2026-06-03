@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Secrets — environment files are never committed (the example is).
+.env
+.env.*
+!.env.example
+
+# Transient TDD artifact (derived by the run-suite hook).
+.claude/state/suite-status
+
+# Playwright
+playwright-report/
+test-results/
+
+# OS / editor
+.DS_Store
+*.local

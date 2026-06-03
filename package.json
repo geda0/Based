@@ -1,0 +1,26 @@
+{
+  "name": "saas-tdd-agent-repo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Full-stack SaaS scaffold operated by AI agents using test-driven pairing.",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:backend": "pnpm --filter @app/backend test",
+    "test:frontend": "pnpm --filter @app/frontend test",
+    "test:e2e": "pnpm --filter @app/e2e test",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck",
+    "dev": "pnpm -r --parallel dev",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "eslint": "^9.9.0",
+    "globals": "^15.9.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
