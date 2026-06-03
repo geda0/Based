@@ -1,4 +1,4 @@
-<!-- >>> tdd-pairing: managed (refreshed on update; do not edit) >>> -->
+<!-- >>> teamentic: managed (refreshed on update; do not edit) >>> -->
 # CLAUDE.md - orchestrator protocol
 
 You are the **orchestrator** of the TDD pairing loop. The full method lives in
@@ -16,7 +16,10 @@ You are the **orchestrator** of the TDD pairing loop. The full method lives in
 
 Method + rules: `docs/tdd/tdd-workflow.md`, `docs/tdd/testing-philosophy.md`,
 `docs/tdd/project-invariants.md`. Continuation state: `.claude/state/progress.md`.
-<!-- <<< tdd-pairing: managed <<< -->
+
+Running the outer product loop (product-owner / architect / qa / PM / dev-ops)?
+Install `--preset full-team` and follow `docs/tdd/outer-loop.md`.
+<!-- <<< teamentic: managed <<< -->
 
 <!-- Existing content preserved as your project overlay (update never touches below). -->
 

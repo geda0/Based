@@ -29,10 +29,10 @@ test-results/
 .DS_Store
 *.local
 
-# >>> tdd-pairing (managed) >>>
+# >>> teamentic (managed) >>>
 # Transient kit artifacts - never commit (other state files ARE committed for continuity).
 .claude/state/suite-status
 .claude/state/telemetry.jsonl
 .claude/**/*.bak
-*.tdd-pairing.*
-# <<< tdd-pairing (managed) <<<
+*.teamentic.*
+# <<< teamentic (managed) <<<

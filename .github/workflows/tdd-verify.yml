@@ -1,0 +1,16 @@
+# Seeded by tdd-pairing — clean-checkout verify so a missing dep / broken baseline
+# fails in CI, not on a machine. Scoped to PRs: pushes to `main` are gated + deployed
+# by deploy-staging.yml, so a push trigger here would be a redundant run.
+name: tdd-verify
+on:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4        # pnpm version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
