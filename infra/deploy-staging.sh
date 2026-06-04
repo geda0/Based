@@ -42,6 +42,25 @@ fi
 GEMINI_SSM_ARN="$(aws ssm get-parameter --name "$SSM_NAME" --region "$REGION" --query 'Parameter.ARN' --output text)"
 echo "    arn: $GEMINI_SSM_ARN"
 
+# YouTube Data API key -> SSM SecureString (Based TV news source), mirroring the
+# Gemini key above: sourced from backend/.env (gitignored) or the env; the value is
+# never printed or passed to CloudFormation (only its ARN is). A local run with the
+# key refreshes the SecureString; CI (no backend/.env) reuses the existing parameter.
+# No key -> the backend YouTube source is failure-silent ([], no spend, server boots).
+YT_SSM_NAME="/based/staging/youtube-api-key"
+step "0b/5  YouTube API key -> SSM SecureString ($YT_SSM_NAME)"
+if [ -n "${YOUTUBE_API_KEY:-}" ]; then
+  aws ssm put-parameter --name "$YT_SSM_NAME" --type SecureString --value "$YOUTUBE_API_KEY" --overwrite --region "$REGION" >/dev/null
+  echo "    stored/updated SecureString (value hidden)"
+elif aws ssm get-parameter --name "$YT_SSM_NAME" --region "$REGION" >/dev/null 2>&1; then
+  echo "    reusing existing SecureString (no YOUTUBE_API_KEY in env/backend/.env)"
+else
+  echo "ERROR: YOUTUBE_API_KEY not set (backend/.env or env) and no existing SSM parameter. Set it and re-run." >&2
+  exit 1
+fi
+YOUTUBE_SSM_ARN="$(aws ssm get-parameter --name "$YT_SSM_NAME" --region "$REGION" --query 'Parameter.ARN' --output text)"
+echo "    arn: $YOUTUBE_SSM_ARN"
+
 # Single-source GEMINI_MODEL from the version-controlled IaC default (GeminiModel's
 # `Default:` in infra/staging.yaml). backend/.env / env OVERRIDES it; CI uses the IaC
 # default. Always passed to CloudFormation (an omitted param on update retains the
@@ -83,7 +102,7 @@ step "3/5  Infrastructure stack (CloudFormation: $MAIN_STACK) — CloudFront + A
 aws cloudformation deploy \
   --stack-name "$MAIN_STACK" \
   --template-file infra/staging.yaml \
-  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "GeminiModel=$GEMINI_MODEL" \
+  --parameter-overrides "BackendImageUri=$IMAGE" "GeminiSsmParameterArn=$GEMINI_SSM_ARN" "YouTubeSsmParameterArn=$YOUTUBE_SSM_ARN" "GeminiModel=$GEMINI_MODEL" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \
   --no-fail-on-empty-changeset
@@ -104,8 +123,17 @@ echo "    backend:         $BE_URL"
 # server-side in SSM; the browser mints only a short-lived ephemeral token via
 # POST /live/session). NO VITE_LIVE_RELAY_URL — the relay was retired (ADR 0007
 # Amendment C, topology a: browser opens Google's Live WSS directly).
-step "4/5  Build frontend (VITE_API_BASE_URL=$BE_URL, VITE_LIVE_VOICE=1) + sync to S3"
-VITE_API_BASE_URL="$BE_URL" VITE_LIVE_VOICE=1 pnpm --filter @app/frontend build
+#
+# VITE_USE_REMOTE_SOURCE=1 turns on the Based TV remote source: the FE fetches
+# GET ${VITE_API_BASE_URL}/sources/events (real YouTube news, served server-side with
+# the SSM YOUTUBE_API_KEY) instead of the static mock. NON-SECRET build flag — the
+# browser never holds the YouTube key (it stays server-side in SSM; the FE only calls
+# our own /sources/events). Failure-silent: a failed/empty endpoint falls back to the
+# mock (ADR 0010 §5). VITE_API_BASE_URL (the App Runner backend URL) is REQUIRED for
+# the remote source — without it the FE would call a relative /sources/events (404).
+# It is baked below for both /narrate and /sources/events.
+step "4/5  Build frontend (VITE_API_BASE_URL=$BE_URL, VITE_LIVE_VOICE=1, VITE_USE_REMOTE_SOURCE=1) + sync to S3"
+VITE_API_BASE_URL="$BE_URL" VITE_LIVE_VOICE=1 VITE_USE_REMOTE_SOURCE=1 pnpm --filter @app/frontend build
 aws s3 sync frontend/dist "s3://$BUCKET/" --delete --region "$REGION"
 
 step "5/5  Invalidate CloudFront cache"

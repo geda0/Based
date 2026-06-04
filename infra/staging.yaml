@@ -11,6 +11,9 @@ Parameters:
   GeminiSsmParameterArn:
     Type: String
     Description: ARN of the SSM SecureString holding GEMINI_API_KEY (created/updated by infra/deploy-staging.sh; never the key value itself).
+  YouTubeSsmParameterArn:
+    Type: String
+    Description: ARN of the SSM SecureString holding YOUTUBE_API_KEY for the Based TV YouTube news source (created/updated by infra/deploy-staging.sh; never the key value itself).
   GeminiModel:
     Type: String
     Default: gemini-3.1-flash-lite
@@ -113,7 +116,8 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 
-  # Runtime role: lets the container read GEMINI_API_KEY from SSM Parameter Store.
+  # Runtime role: lets the container read its runtime secrets (GEMINI_API_KEY +
+  # the Based TV YOUTUBE_API_KEY) from SSM Parameter Store. Scoped per-parameter.
   AppRunnerInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -126,13 +130,15 @@ Resources:
               Service: tasks.apprunner.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: read-gemini-secret
+        - PolicyName: read-runtime-secrets
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: [ssm:GetParameter, ssm:GetParameters]
-                Resource: !Ref GeminiSsmParameterArn
+                Resource:
+                  - !Ref GeminiSsmParameterArn
+                  - !Ref YouTubeSsmParameterArn
               - Effect: Allow
                 Action: kms:Decrypt
                 Resource: "*"
@@ -165,6 +171,8 @@ Resources:
             RuntimeEnvironmentSecrets:
               - Name: GEMINI_API_KEY
                 Value: !Ref GeminiSsmParameterArn
+              - Name: YOUTUBE_API_KEY
+                Value: !Ref YouTubeSsmParameterArn
       InstanceConfiguration:
         Cpu: "0.25 vCPU"
         Memory: "0.5 GB"

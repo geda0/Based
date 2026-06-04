@@ -5,11 +5,13 @@ import { registerNarrateRoutes, type GeminiClient } from "./modules/narrate/narr
 import { createGeminiClient } from "./modules/narrate/gemini-client.js";
 import { registerLiveRoutes, type LiveTokenClient } from "./modules/live/live.routes.js";
 import { createLiveTokenClient } from "./modules/live/live-token-client.js";
+import type { Source } from "./modules/sources/youtube-source.js";
+import { createSourceRegistry } from "./modules/sources/source-registry.js";
 
 // App factory so tests build an instance and use app.inject() — no real network.
 // Gemini + the live mint client are injectable so tests stub them; each defaults
 // to its real client.
-export function buildApp(opts?: { gemini?: GeminiClient; liveMint?: LiveTokenClient }): FastifyInstance {
+export function buildApp(opts?: { gemini?: GeminiClient; liveMint?: LiveTokenClient; sources?: Source[] }): FastifyInstance {
   const app = Fastify({ logger: false });
   // Allowlist read at call time so tests/env can set CORS_ORIGINS per build.
   const origins = (process.env.CORS_ORIGINS ?? "http://localhost:5173")
@@ -21,5 +23,7 @@ export function buildApp(opts?: { gemini?: GeminiClient; liveMint?: LiveTokenCli
   const gemini = opts?.gemini ?? createGeminiClient();
   registerNarrateRoutes(app, gemini);
   registerLiveRoutes(app, opts?.liveMint ?? createLiveTokenClient());
+  const registry = createSourceRegistry(opts?.sources ?? []);
+  app.get("/sources/events", async () => registry.fetchAll());
   return app;
 }

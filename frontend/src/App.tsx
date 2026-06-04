@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { HostDirective, PerceptionEvent } from './contracts';
-import { events, digest } from './mocks/event-graph';
+import { events as mockEvents, digest } from './mocks/event-graph';
+import { type SourceRegistry } from './lib/sources';
 import { ChannelSurfShell } from './components/channel-surf-shell';
 import { Character } from './components/character';
 import { createEventBus } from './lib/event-bus';
@@ -13,7 +14,6 @@ import { createOpenRelay } from './lib/live-relay-client';
 import { createAudioSink } from './lib/audio-sink';
 import { rankFeed, computeEventScore } from './lib/ranker';
 
-const feed = rankFeed(events);
 const defaultNarrate = createNarrateClient(); // stable module-level identity (D1: avoids per-render client churn)
 const defaultVoice: VoiceNarrator = {
   speak: (text) =>
@@ -33,12 +33,23 @@ const liveVoice: VoiceNarrator = createLiveNarrator({
   audio: createAudioSink(),
 });
 
-export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }): JSX.Element {
+export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator; registry?: SourceRegistry }): JSX.Element {
   const [speakDirective, setSpeakDirective] = useState<HostDirective>();
   const [cutDirective, setCutDirective] = useState<HostDirective>();
   const [started, setStarted] = useState(false);
   const narrate = props?.narrate ?? defaultNarrate;
   const voice = props?.voice ?? (import.meta.env.VITE_LIVE_VOICE ? liveVoice : defaultVoice);
+  const registry = props?.registry;
+
+  const [events, setEvents] = useState<PerceptionEvent[]>(registry ? [] : mockEvents);
+  useEffect(() => {
+    if (!registry) return;
+    let alive = true;
+    void registry.fetchAll().then((evs) => { if (alive) setEvents(evs); });
+    return () => { alive = false; };
+  }, [registry]);
+
+  const feed = useMemo(() => rankFeed(events), [events]);
 
   useEffect(() => {
     const bus = createEventBus<PerceptionEvent>();
@@ -72,7 +83,7 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
       sourceFeed.stop();
       unsubscribe();
     };
-  }, [narrate, voice, started]);
+  }, [narrate, voice, started, events]);
 
   return (
     <div className="app-shell">
@@ -81,19 +92,21 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
         <span className="app-tagline">Your AI host for live discovery</span>
       </header>
       <main className="app-stage">
-        <ChannelSurfShell
-          feed={feed}
-          directive={cutDirective}
-          hostPresence={<Character directive={speakDirective} />}
-          cta={
-            !started ? (
-              <div className="cta-overlay">
-                <p className="cta-tagline">Your AI host is ready — press play</p>
-                <button className="cta-btn" onClick={() => setStarted(true)}>▶ Start watching</button>
-              </div>
-            ) : null
-          }
-        />
+        {feed.events.length > 0
+          ? <ChannelSurfShell
+              feed={feed}
+              directive={cutDirective}
+              hostPresence={<Character directive={speakDirective} />}
+              cta={
+                !started ? (
+                  <div className="cta-overlay">
+                    <p className="cta-tagline">Your AI host is ready — press play</p>
+                    <button className="cta-btn" onClick={() => setStarted(true)}>▶ Start watching</button>
+                  </div>
+                ) : null
+              }
+            />
+          : <div aria-label="loading feed" />}
       </main>
     </div>
   );
