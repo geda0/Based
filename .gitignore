@@ -34,6 +34,7 @@ test-results/
 .claude/state/suite-status
 .claude/state/telemetry.jsonl
 .claude/state/tics.jsonl
+.claude/state/tics.d/
 .claude/**/*.bak
 *.team-tactics.*
 # <<< team-tactics (managed) <<<
