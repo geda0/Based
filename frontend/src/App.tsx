@@ -42,7 +42,7 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
 
   useEffect(() => {
     const bus = createEventBus<PerceptionEvent>();
-    const loop = createHostLoop();
+    const loop = createHostLoop({ silenceBudgetMs: 12000 });
     const nloop = createNarratingHostLoop(loop, narrate);
     const unsubscribe = bus.subscribe((event) => {
       void (async () => {

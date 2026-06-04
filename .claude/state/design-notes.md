@@ -1,4 +1,167 @@
-# Design notes — Based prototype · WDC · "Watchable demo cut" — KICKOFF
+# Design notes — Based prototype · WDC-D2 · demo pacing (a lively, watchable cadence) — KICKOFF
+
+> **STATUS: WDC-D2 KICKOFF — ready for the inner TDD loop.** A navigator-found defect from the
+> WDC staging watch-through: the watchable cut WORKS (real video + the live Gemini host speaks),
+> but the **pacing is too sparse** — the host narrates ~twice, far apart, then goes quiet. This is a
+> focused **liveliness fix** (tune the demo event density + the App's demo silence budget so fresh
+> moments keep surfacing), **NOT a redesign and NOT a new behavior**. The host-loop logic / §6
+> contracts / live-voice transport are **UNCHANGED**; this is **data + one App config + test-decoupling**.
+> _(The WDC KICKOFF that built the watchable cut is retained below for context — WDC is shipped + being
+> accepted; WDC-D2 enlivens it.)_
+
+## WDC-D2 — WHY THIS FIX (the navigator's watch-through)
+**Navigator feedback (verbatim, 2026-06-03):** _"looks ok, vid plays an host speaks the 1st line, then a
+really long silence, then it spoke again."_ The experience is real — video plays, the live host speaks —
+but the host reads as **asleep between two far-apart lines**. The product thesis is **the character earning
+its interruptions (silent ↔ active)**; for a *watchable* demo the active side has to fire often enough that
+the host feels **present**. WDC-D2 makes the demo lively without weakening the silence-budget machinery.
+
+## WDC-D2 — ROOT CAUSE (confirmed in-tree)
+- `frontend/src/mocks/event-graph.ts` has only **3 events** at `ts` **1 / 45000 / 90000**; only **2 clear**
+  `surfaceThreshold` 0.6 (event 3 `evt_jc_drama` is `heatDelta` 0.55), and
+- `frontend/src/lib/host-loop.ts:14` defaults `silenceBudgetMs` to **30000**, and `frontend/src/App.tsx:45`
+  calls `createHostLoop()` with **no opts** → the demo runs on the 30s budget.
+- Net: the host speaks at ~12s and ~57s, then dead air. _(Compounding but SEPARATE: per-line wake latency
+  ~12s = the `/narrate` round-trip + live-voice setup — the existing **LV1-D2**, NOT this fix's target.)_
+
+## WDC-D2 — FEATURE
+A lively, watchable host cadence on the demo: **enrich the demo event-graph** (~6–8 surfacing events spaced
+~15–20s apart over a ~2–3 min window) and **tune the App's demo silence budget** (`createHostLoop({ silenceBudgetMs: ~12000 })`)
+so fresh moments keep surfacing and the host narrates roughly **every ~15–25s with no dead-air gaps**. Because
+enriching the mock breaks the App tests that hardcode its exact timing/heat, **first decouple the App tests from
+the demo mock** (drive a controlled fixture). The host-loop logic, the 30s loop DEFAULT + its unit tests, the §6
+contracts, and the live-voice transport are **UNCHANGED** — WDC-D2 changes only **WHAT data plays and HOW DENSELY**,
+plus the **demo** budget knob and the **test fixtures**, never WHEN/WHETHER a line is voiced by the loop's logic.
+
+## WDC-D2 — ACCEPTANCE CRITERIA (layer-tagged, observable; each → one or more red→green cycles where TDD-able)
+_Tags: **[TDD]** = a hermetic unit/component cycle drives it; **[data]/[config]** = a straight edit made safe by
+the invariant test (NOT its own behavioral RED); **[qa/visual]** = qa-verifier / navigator confirms on the running
+app. Suggested FIRST step = the App-test decoupling **[TDD] (a)** — land the fixture, migrate the mock-coupled
+assertions, keep the bar green BEFORE enriching the data._
+
+### 1 — Decouple the App tests from the demo mock (the test-decoupling RED)  — `[frontend]` **[TDD]**
+- **[ ] [frontend] The App tests pin the App's BEHAVIOR on a controlled fixture, independent of the demo mock's
+  exact timing/heat.** Given `frontend/tests/App.test.tsx`, when it drives surfacing behavior (gesture-gating,
+  surface→speak, the drain-coupled revert, the cost-gating tripwire, the two-surface race), then it uses a **fixed
+  small fixture** (e.g. `vi.mock('../src/mocks/event-graph', () => ({ digest, events: <fixed N-event fixture> }))`)
+  rather than asserting against the live mock's `ts 45000` / `ts 90000` / `heatDelta 0.78` / `0.55` values (today
+  hardcoded at App.test.tsx ~lines 351–381 and ~431, e.g. _"exactly two surfaces here"_). _(TDD: migrate each
+  mock-coupled assertion onto the fixture so the App behavior stays pinned and the demo mock becomes freely tunable;
+  the suite stays green through the migration. **This is the load-bearing decoupling — do it FIRST so the data
+  enrichment doesn't fight red App tests.** Keep the existing behavioral coverage intact — gesture-gating,
+  surface→speak, drain-revert, cost-gating, the race — only their SOURCE of events changes to the fixture.)_
+
+### 2 — Pin the enriched demo-graph shape's INVARIANTS  — `[frontend]` **[TDD]**
+- **[ ] [frontend] `event-graph.test.ts` asserts the enriched shape's invariants (so liveliness can't silently
+  regress).** Given `frontend/src/mocks/event-graph.ts`, when its events are read, then there are **≥ ~6 events**,
+  **every event `heatDelta` ≥ 0.6** (so each clears the default `surfaceThreshold` and surfaces), a **digest** line
+  is present, **no `embedUrl` contains `EXAMPLE_`**, and Twitch vantages match `player.twitch.tv/?channel=` — and
+  (sanity) the events are spaced over the demo window (finite, non-negative, increasing-ish `ts`). _(TDD: extend the
+  existing `event-graph.test.ts` invariant test — it already checks digest/≥2-events/vantages/unique-ids — to assert
+  the **liveliness invariants** (the ≥0.6-heat-every-event + ≥~6-events count), NOT exact values. This is the
+  tripwire that makes the data edit safe.)_
+
+### 3 — Enrich the demo event-graph (data; made safe by #2)  — `[frontend]` **[data]**
+- **[ ] [data] The demo mock has ~6–8 surfacing events spaced ~15–20s apart over the demo window, varied across
+  the wired live channels, spoiler-safe.** Edit `frontend/src/mocks/event-graph.ts`: ~6–8 events, **each `heatDelta`
+  ≥ 0.6**, `ts` spaced ~15000–20000ms apart across ~2–3 min, vantages **varied across the already-wired reliably-live
+  channels** (rifftrax / 247jynxzi / caedrel247 / lirik_247), narratives spoiler-safe (outcomes stay in `narrative`
+  as data — **never rendered**; the rail shows `type · streamer` per ADR 0009). _(NOT a TDD cycle — straight content
+  edit, guarded green by #2's invariant tripwire + the existing rail/Player spoiler/verbatim tests. The exact ids /
+  heat / spacing within the bands are the navigator's content call.)_
+
+### 4 — Tune the demo silence budget (config; made safe by #1)  — `[frontend]` **[config]**
+- **[ ] [config] The App runs the demo on a tuned silence budget so ~15–20s-apart events surface.** Edit
+  `frontend/src/App.tsx:45` to `createHostLoop({ silenceBudgetMs: ~12000 })` (the navigator can tune the exact ms).
+  **The loop's 30000 DEFAULT (`host-loop.ts:14`) and its unit tests (`host-loop.test.ts`) stay UNCHANGED** — this is
+  an **App-level demo config**, not a loop-contract change. _(NOT a TDD cycle — one-line demo config; the loop's own
+  budget behavior is already proven by its unchanged unit tests, and the App's behavior is pinned by #1's fixture.)_
+
+### 5 — The lively cadence reads as present on the running app  — `[frontend]` **[qa/visual]**
+- **[ ] [qa/visual] Over a ~2–3 min watch, the host narrates roughly every ~15–25s with no dead-air gaps; it feels
+  present, not asleep.** _(qa-only / navigator: open staging, click "▶ Start watching," watch ~2–3 min — confirm the
+  host wakes repeatedly at a lively cadence (~15–25s apart), cuts between the varied live channels, and never goes
+  dead-air-silent for a long stretch. The hermetic suite can't judge "feels present" — this is the experience proof.
+  Pairs with the watch-through that found the defect.)_
+
+## WDC-D2 — TDD-vs-DATA SPLIT (so the team executes consistently)
+- **[TDD] (the inner loop — RED→GREEN):** **#1 App-test decoupling** (the load-bearing fixture migration — do FIRST)
+  · **#2 enriched-shape invariant assertions** in `event-graph.test.ts` (the data tripwire). **~2 cycles' worth.**
+- **[data / config] (straight edits, made safe by the tests above — NOT their own behavioral RED):** **#3 mock
+  enrichment** (~6–8 events; content) · **#4 `createHostLoop({ silenceBudgetMs })`** in `App.tsx` (one-line config).
+  Land #3/#4 **after** #1 (so App tests don't go red) and **alongside** #2 (so the new shape is pinned as it lands).
+- **[qa/visual] (ACCEPT):** **#5** the lively cadence on staging (navigator / qa watch-through).
+- **SUGGESTED CYCLE ORDER:** (1) **[TDD]** App-test decoupling onto a `vi.mock` fixture → bar green. (2) **[TDD]**
+  `event-graph.test.ts` enriched invariants (heat ≥ 0.6 every event, ≥~6 events). (3) **[data]** enrich the mock to
+  satisfy (2). (4) **[config]** tune `silenceBudgetMs` in `App.tsx`. (5) **CRITIC** (tdd-critic) on the decoupling
+  cycles. (6) **ACCEPT** — qa-verifier / navigator watch the cadence on staging; then PO sign-off.
+
+## WDC-D2 — DEFINITION OF DONE
+1. **`pnpm verify` = 0** — App tests pass on the controlled fixture; `event-graph.test.ts` asserts the enriched
+   invariants; the **host-loop unit tests + its 30000 default are UNCHANGED** (the suite stays hermetic).
+2. **tdd-critic = PASS** on the decoupling cycles.
+3. **qa-verifier / navigator confirm** the lively cadence on the running app — the host narrates ~every 15–25s with
+   no dead-air over a ~2–3 min watch (#5).
+4. **PO sign-off** vs this acceptance + the product thesis (the character stays *present*, earning frequent-enough
+   interruptions).
+5. **Invariants re-asserted** (the host-loop logic is UNCHANGED): cost-gating **bounded** (no `/narrate` storm — one
+   call + one live-voice session per surface, bounded over the window), spoiler-safety (rail `type · streamer`,
+   captions safe, `narrative` never rendered — ADR 0009), official-embeds-only (first-party `player.twitch.tv`
+   verbatim + ADR 0008 `parent`), secrets-from-env (untouched — pure FE data/config).
+
+## WDC-D2 — BASED INVARIANTS (carried — re-ASSERTED, not re-proven; the host loop / §6 seam are UNCHANGED — ADR 0003)
+1. **Spoiler-safety — KEPT.** Enriched narratives keep outcomes as **data in `narrative` only**; the rail still shows
+   `type · streamer` and never the `narrative` (ADR 0009); the host speaks the safe `HostDirective.utterance`. _Pinned
+   by:_ the existing rail spoiler tests (unchanged) + #2's no-`EXAMPLE_`/shape guard. The data edit must not put an
+   outcome where it renders.
+2. **Silence budget — KEPT (still ENFORCED).** The host still earns each interruption; WDC-D2 only **lowers the demo
+   budget to ~12s** so ~15–20s events surface — the loop's own 30s default + its unit tests are **untouched**, and the
+   loop still rate-limits within the (now demo-tuned) window. _Carried by:_ the unchanged `host-loop.test.ts`; the App
+   fixture (#1) re-pins the App's surface→speak behavior on controlled events.
+3. **Cost-gating — KEPT, bounded.** Still exactly **one `/narrate` + one live-voice session per surface** (LV1/M3,
+   unchanged); WDC-D2 increases the NUMBER of surfaces over the demo (denser data) but stays **budget-gated, not a
+   storm** — assert bounded calls over the window, never a firehose. _Carried by:_ the unchanged LV1/narrate
+   cost-gating tests + the App cost-gating tripwire migrated onto the fixture (#1).
+4. **Official embeds only — KEPT.** The enriched vantages reuse the already-wired first-party `player.twitch.tv`
+   embeds (verbatim + ADR 0008 `parent`); no new rehost. _Pinned by:_ #2's no-`EXAMPLE_`/`player.twitch.tv/?channel=`
+   guard + the existing Player verbatim/parent tests (unchanged).
+5. **Secrets-from-env — KEPT, untouched.** WDC-D2 is pure FE (data + one App config + test fixtures); no key/credential
+   path touched. _No new test needed._
+6. **Contracts-as-seam — ENFORCED.** No §6 contract changes. WDC-D2 is data density + a demo budget knob + test
+   decoupling **above** the contracts; the character/player/host-loop wiring is otherwise unchanged.
+
+## WDC-D2 — CONSTRAINTS / NON-GOALS
+- **NOT a redesign, NOT a new behavior, NOT a real event engine.** WDC-D2 = **enrich demo data + tune the demo
+  silence budget + decouple the App tests from the mock.** Do **NOT** reshape `frontend/src/contracts/`,
+  `host-loop.ts` (incl. its 30000 default) or its unit tests, `narrating-host-loop.ts`, the live-voice transport, or
+  the cut path. The silence-budget / cost-gating / spoiler-safety **logic** is untouched — only the **demo data
+  density**, the **App-level budget config**, and the **test fixtures** change.
+- **Do the App-test decoupling FIRST.** Enriching the mock before the App tests are on a fixture turns the suite red
+  (the App tests assert "exactly two surfaces" / the `ts 45000`/`90000` windows). Land the `vi.mock` fixture +
+  migrate those assertions first, keep the bar green, THEN enrich the data + tune the budget.
+- **The host-loop unit tests stay UNCHANGED.** `host-loop.test.ts` builds its own events with an explicit
+  `silenceBudgetMs` and does NOT import the mock — it is already decoupled and must not change. Only `App.test.tsx`
+  (mock-coupled) and `event-graph.test.ts` (shape) are touched.
+- **Real ids / heat / spacing within the bands are the navigator's content.** The implementer enriches the mock to
+  satisfy #2's invariants (≥~6 events, every heat ≥ 0.6, ~15–20s spacing); the specific channel mix, narratives, and
+  exact ms are content — vary across the wired live channels (rifftrax / 247jynxzi / caedrel247 / lirik_247).
+- **The hermetic suite stays hermetic.** No test loads a real iframe / socket / audio. "Feels present over 2–3 min"
+  is **qa-verifier / navigator on staging** (#5), not a unit assertion.
+- **OUT of scope (deferred — named so they aren't lost):**
+  - **Per-line wake latency** (~12s) — that is **LV1-D2** (keep the live-voice WSS open / pre-mint; overlap the
+    `/narrate` round-trip). An LV optimization, already filed; NOT this fix's target.
+  - **Dynamic real-event sourcing / a real event-simulation engine** — that is **M5** (thin real heat). WDC-D2 is the
+    quickest data/config liveliness cut, explicitly not an engine.
+  - **The "while you were gone" digest on load** — **M4** (DoD #1). Unchanged by WDC-D2.
+  - **WDC-D1** (stale `<title>`) — already FIXED in the working tree; queued for the next deploy. Not WDC-D2.
+- **Decision posture:** WDC-D2 introduces **no new §13 escalation**. It rides on settled-for-now defaults (persona =
+  one host; voice = the shipped Gemini Live, audible/voice-identity still the navigator's ear at demo — carried from
+  LV1); rights/ToS = official Twitch embeds only (unchanged — reusing already-wired ids). The exact `silenceBudgetMs`
+  value and the demo channel mix are **tuning/content the navigator can adjust**, not a seam decision.
+
+---
+
+# Design notes — Based prototype · WDC · "Watchable demo cut" — KICKOFF (retained for context — shipped + being accepted)
 
 > **STATUS: WDC KICKOFF — ready for the inner TDD loop.** Navigator-prioritized ahead of M4
 > (the navigator looked at the deployed staging app and chose **"quickest watchable cut first"**).

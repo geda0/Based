@@ -1,6 +1,100 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { App } from "../src/App.js";
+
+// Decouple these tests from the shared demo event-graph: pin them to a FIXED
+// in-test fixture so the demo mock can be enriched (more events, closer
+// together) for liveliness without breaking the timing-coupled assertions here.
+// This fixture reproduces the demo mock as it stood when these tests were
+// written — the same 3 events, timings (ts 1 / 45000 / 90000), heatDeltas
+// (0.91 / 0.78 / 0.55), vantages, and outcome-bearing narratives (kept so the
+// spoiler-leak assertion in test #1 stays meaningful). `vi.mock` is hoisted, so
+// the fixture is defined INLINE inside the factory — it cannot reference outer
+// variables. Both <App/> and the tests now derive from this single fixture.
+vi.mock("../src/mocks/event-graph", () => {
+  const digest =
+    "Quiet night so far — a Valorant major semifinal just went live, a speedrunner is one trick from a world record, and there's slow-building drama in a Just Chatting stream.";
+
+  const events = [
+    {
+      eventId: "evt_major_semi",
+      type: "clutch",
+      narrative:
+        "1v3 retake clutch to win the round in the Valorant major semifinal",
+      heatDelta: 0.91,
+      novelty: 0.8,
+      legibility: 0.95,
+      confidenceTier: 1,
+      source: { kind: "broadcast", ref: "valorant_official_feed" },
+      vantages: [
+        {
+          streamId: "vmajor_co_a",
+          platform: "twitch",
+          embedUrl: "https://player.twitch.tv/?channel=rifftrax",
+          offsetSec: 6,
+          lensScore: 0.92,
+          streamer: "rifftrax",
+        },
+        {
+          streamId: "vmajor_off",
+          platform: "twitch",
+          embedUrl: "https://player.twitch.tv/?channel=247jynxzi",
+          offsetSec: 0,
+          lensScore: 0.7,
+          streamer: "247jynxzi",
+        },
+      ],
+      ts: 1,
+    },
+    {
+      eventId: "evt_speedrun_wr",
+      type: "reveal",
+      narrative:
+        "Speedrunner attempting the final trick for a world record, chat going wild",
+      heatDelta: 0.78,
+      novelty: 0.9,
+      legibility: 0.9,
+      confidenceTier: 2,
+      source: { kind: "original" },
+      vantages: [
+        {
+          streamId: "vrun_main",
+          platform: "twitch",
+          embedUrl: "https://player.twitch.tv/?channel=caedrel247",
+          offsetSec: 0,
+          lensScore: 0.88,
+          streamer: "caedrel247",
+        },
+      ],
+      ts: 45000,
+    },
+    {
+      eventId: "evt_jc_drama",
+      type: "drama",
+      narrative:
+        "Slow-building disagreement on a Just Chatting stream; chat is split",
+      heatDelta: 0.55,
+      novelty: 0.4,
+      legibility: 0.7,
+      confidenceTier: 3,
+      source: { kind: "original" },
+      vantages: [
+        {
+          streamId: "vjc_main",
+          platform: "twitch",
+          embedUrl: "https://player.twitch.tv/?channel=lirik_247",
+          offsetSec: 0,
+          lensScore: 0.6,
+          streamer: "lirik_247",
+        },
+      ],
+      ts: 90000,
+    },
+  ];
+
+  return { digest, events };
+});
+
 import { events } from "../src/mocks/event-graph";
 
 describe("App", () => {
