@@ -70,6 +70,29 @@ describe("Character", () => {
     expect(calls).toEqual(["listen — eyes on the Major"]);
   });
 
+  it("renders a digest directive as speaking and shows its caption", () => {
+    // The digest is the host's "while you were gone" catch-up — a spoken beat, so the
+    // character must treat action:'digest' the same as a speak: visibly speaking, with
+    // the catch-up utterance shown as the caption. (character.tsx was widened so
+    // 'digest' counts as speaking; only 'speak'/'idle' were covered before.)
+    const utterance = "Catching you up — a major semifinal is live";
+    const digestDirective: HostDirective = {
+      action: "digest",
+      utterance,
+      spoilerSafe: true,
+    };
+
+    render(<Character directive={digestDirective} />);
+
+    // Observable speaking state: status reads "speaking" with the speaking aria-label.
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/speaking/i);
+    expect(status).toHaveAttribute("aria-label", "host speaking");
+
+    // The catch-up line is shown as the on-screen caption while speaking.
+    expect(status).toHaveTextContent(utterance);
+  });
+
   it("returns to idle on its own a short time after speaking, without a follow-up idle directive", async () => {
     // In the wired app nothing sends an idle after a speak, so the host must un-stick
     // itself: voice its line, then fall quiet once the speaking window elapses.

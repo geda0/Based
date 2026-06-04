@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { HostDirective, PerceptionEvent, RankedFeed } from './contracts';
-import { events } from './mocks/event-graph';
+import type { HostDirective, PerceptionEvent } from './contracts';
+import { events, digest } from './mocks/event-graph';
 import { ChannelSurfShell } from './components/channel-surf-shell';
 import { Character } from './components/character';
 import { createEventBus } from './lib/event-bus';
@@ -11,9 +11,9 @@ import { createNarratingHostLoop } from './lib/narrating-host-loop';
 import { createLiveNarrator, type VoiceNarrator } from './lib/live-narrator';
 import { createOpenRelay } from './lib/live-relay-client';
 import { createAudioSink } from './lib/audio-sink';
+import { rankFeed, computeEventScore } from './lib/ranker';
 
-// M1 placeholder ranking: eventScore = heatDelta (real ranker = M4). Mock is already heat-desc.
-const feed: RankedFeed = { events: events.map((e) => ({ ...e, eventScore: e.heatDelta })) };
+const feed = rankFeed(events);
 const defaultNarrate = createNarrateClient(); // stable module-level identity (D1: avoids per-render client churn)
 const defaultVoice: VoiceNarrator = {
   speak: (text) =>
@@ -46,8 +46,7 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
     const nloop = createNarratingHostLoop(loop, narrate);
     const unsubscribe = bus.subscribe((event) => {
       void (async () => {
-        // M2 placeholder score = heatDelta; M4 swaps in the real ranker.
-        const directives = await nloop.onEvent({ ...event, eventScore: event.heatDelta });
+        const directives = await nloop.onEvent({ ...event, eventScore: computeEventScore(event) });
         for (const d of directives) {
           if (d.action === 'speak') {
             setSpeakDirective(d);
@@ -60,6 +59,13 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator }):
     });
     const sourceFeed = createSourceGraphFeed(events, bus);
     if (started) {
+      if (digest) {
+        const d: HostDirective = { action: 'digest', utterance: digest, spoilerSafe: true };
+        setSpeakDirective(d);
+        const revertIfCurrent = () =>
+          setSpeakDirective((cur) => (cur === d ? { action: 'idle', spoilerSafe: true } : cur));
+        void voice.speak(digest).then(revertIfCurrent, revertIfCurrent);
+      }
       sourceFeed.start();
     }
     return () => {

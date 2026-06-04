@@ -28,6 +28,17 @@ describe("mock event-graph", () => {
     expect(new Set(eventIds).size).toBe(eventIds.length);
   });
 
+  it("keeps the digest spoiler-safe: the host voices it on Start, so it must not leak an outcome", () => {
+    // The host VOICES the digest as the "while you were gone" catch-up on Start,
+    // so it must meet the same spoiler bar as the on-screen rail. Mirror the exact
+    // banned outcome tokens App.test.tsx asserts for the rail.
+    expect(typeof digest).toBe("string");
+    expect(digest.trim().length).toBeGreaterThan(0);
+
+    expect(digest).not.toMatch(/to win the round/i);
+    expect(digest).not.toMatch(/world record/i);
+  });
+
   it("is dense + hot enough for a lively host cadence: enough surfacing events, no dead-air gaps, prompt first beat", () => {
     // Enough events to keep the host busy over the window.
     expect(events.length).toBeGreaterThanOrEqual(6);

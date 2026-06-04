@@ -1,7 +1,7 @@
 import type { PerceptionEvent } from '../contracts';
 
 export const digest =
-  "Feed is heating up — a Valorant major semifinal clutch just happened, a speedrunner is one trick from a world record, a surprise game launch drew thousands in seconds, a pro LoL draft reveal has chat split, a streamer's IRL moment went viral, and drama is building in Just Chatting.";
+  "Feed is heating up — a Valorant major semifinal is live, a speedrunner is closing in on a huge run, a surprise game launch is pulling thousands, a pro LoL draft has chat buzzing, a streamer's IRL moment is blowing up, and drama is building in Just Chatting.";
 
 export const events: PerceptionEvent[] = [
   {

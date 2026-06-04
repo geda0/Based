@@ -14,7 +14,7 @@ export function Character(props: {
   // extra flushed state update), then a timer marks this directive reverted so the
   // host falls quiet on its own once the speaking window elapses.
   const [reverted, setReverted] = useState<HostDirective>();
-  const speaking = directive?.action === 'speak' && reverted !== directive;
+  const speaking = (directive?.action === 'speak' || directive?.action === 'digest') && reverted !== directive;
 
   useEffect(() => {
     if (directive?.action !== 'speak') return undefined;

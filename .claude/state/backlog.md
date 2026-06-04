@@ -8,7 +8,30 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Now (in flight)
 
-### WDC-D2 · demo pacing — a lively, watchable host cadence (the host stays present, not asleep) — `[frontend]` — milestone: **navigator-prioritized (WDC liveliness follow-up, ahead of M4)** — priority: **NOW (navigator-found defect from the WDC staging watch-through)** — status: **todo (KICKOFF written → `design-notes.md` → WDC-D2)**
+### M4 · Two-level ranking + "while you were gone" digest — `[frontend]` — milestone: **M4 (brief DoD #1 — the LAST unmet brief DoD)** — priority: **NOW (the one remaining brief Definition-of-Done item; WDC accepted)** — status: **in-progress (KICKOFF written → `design-notes.md` → M4; first RED = the ranker ordering proof)**
+  - **KICKOFF: `design-notes.md` → M4** (full layer-tagged acceptance, the suggested first RED, the TDD plan: ranker unit → integration → digest, and the carry-forward watch-outs). Opened at the WDC accept boundary (2026-06-03) — M4 is now the in-flight feature.
+  - **Why now (the brief's last unmet DoD):** M0–M3, LV1, WDC, WDC-D2 are all shipped/accepted. M4 is **brief §12 DoD #1** ("App loads → 'while you were gone' digest plays in the host's voice") **plus** the brief's signature **two-level ranking** (§4.3) — the REAL `eventScore` that's been an **M1/M2 placeholder** since the shell landed. Completing it closes the brief's Definition of Done.
+  - **Two things this feature delivers (both pure-FE, additive on existing contracts):**
+    1. **REAL two-level ranking** — replace the placeholder `eventScore = heatDelta` (`App.tsx:16` feed map + `App.tsx:50` per-event) with a **pure, unit-testable ranker** that computes `eventScore` from the event signals the brief names (heatDelta / novelty / legibility / confidenceTier — §4.2/§4.4), and sorts `RankedFeed.events` **desc by `eventScore`**. **Within-event vantage ranking by `lensScore` is already done** (`topVantage` / `lib/top-vantage.ts`) — M4 adds the **event-level** rank. The ranker drives **which event surfaces/ranks** (the rail order + which event the host narrates).
+    2. **"While you were gone" digest on load** — on Start-watching, the host delivers a **spoiler-safe catch-up** (the mock's `digest` string — currently exported but **unused in the UI** — plus a tease of the top missed moments) **before** the live feed surfaces anything. The brief's "open it, get caught up" experience (§5, §9 M4; DoD #1: "the channel is never empty even at 4am").
+  - **The placeholder being replaced (confirmed in-tree):** `frontend/src/App.tsx:16` `const feed = { events: events.map((e) => ({ ...e, eventScore: e.heatDelta })) }` and `App.tsx:50` `nloop.onEvent({ ...event, eventScore: event.heatDelta })`. The §11 mock (`frontend/src/mocks/event-graph.ts`) exports `digest` but `App.tsx:3` imports only `{ events }` — **the digest is never imported or rendered.** `HostDirective.action` already includes `'digest'` in its union (`contracts/index.ts:30`) but **nothing produces or consumes a digest directive yet.**
+  - **Acceptance (full layer-tagged, observable bullets in `design-notes.md` → M4 ACCEPTANCE CRITERIA):** a pure `rankFeed`/`scoreEvent` ranker computes `eventScore` from the signals and sorts desc (**with an ORDERING PROOF — a case where the real ranker reorders events differently from raw `heatDelta`, so it's provably not a no-op**); the App + rail consume the ranker's order; on Start-watching the host emits **exactly one** spoiler-safe **digest** narration FIRST (before any timeline event); ≥2 timeline events still fire after. **On every path that emits a `HostDirective`/narration (incl. the digest), the Based invariants ride:** spoiler-safety (the digest names **no outcome token** — anticipation-only; every directive `spoilerSafe: true`), cost-gating (**one** digest, not a storm), silence budget (the digest is the catch-up, not a new firehose), official-embeds-only (unchanged — ranking/digest touch no embed), secrets-from-env (untouched — pure FE).
+  - **First RED (suggested):** the **ranker ordering proof** — a pure unit test (`frontend/tests/ranker.test.ts` against a new `frontend/src/lib/ranker.ts`) feeding events whose `eventScore` order **differs from their raw `heatDelta` order**, asserting `rankFeed(...).events` comes back in the **ranker's** `eventScore`-desc order (not heatDelta order). Pure, deterministic, no React/timers — the cleanest, highest-value first behavior, and it directly kills the "is this a no-op?" risk. _(Full TDD plan + cycle order in `design-notes.md` → SUGGESTED CYCLE ORDER: ranker unit (ordering + score-from-signals) → App/rail integration onto the ranker → digest directive (produced-first, spoiler-safe, cost-gated one) → digest surfaces in the host's voice on load.)_
+  - **Watch-outs (carried forward — TEST these here):**
+    - **`fireAtMs`(ms) vs `offsetSec`(sec) off-by-1000 trap** — `HostDirective.staging.fireAtMs` is **ms**; `Vantage.offsetSec` is **sec**. If M4 touches predictive-staging timing (digest tease or a `staging` field), **convert explicitly and test it** (a unit asserting the ms←sec×1000 conversion). _(Carried from `progress.md` "Carry-forward risks".)_
+    - **`eventScore` ORDERING proof (non-no-op)** — the ranker MUST be proven to reorder differently from raw `heatDelta` in at least one case (per the first RED above). `RankedFeed.events` "sorted desc by `eventScore`" is a doc-comment (`contracts/index.ts:25`) the ranker must **prove**, not assume. _(Carried from `progress.md` + the M4 Next entry.)_
+    - **Digest spoiler-safety** — the digest line must contain **no outcome token** (anticipation-only, like the host's utterances; ADR 0006/0009). A banned-outcome-token assertion on the digest, mirroring the host-loop/rail spoiler tests. The mock's current `digest` string is anticipation-framed ("is one trick from a world record", "drama is building") — **keep it outcome-free**; if the digest is composed from event data, derive from **safe fields** (type/streamer), never raw `narrative`.
+    - **Digest cost-gating** — exactly **one** digest narration on load (not one-per-event, not a storm). A call-count assertion (zero before Start-watching; exactly one digest narration after; the live `/narrate`/live-voice path still cost-gated per surface, unchanged).
+  - **Architect needed? → NO (additive on existing §6 contracts; skip the architect DESIGN).** _Verdict + rationale below._ M4 reuses the **existing** §6 seam: the ranker produces the **already-specified** `RankedFeed` (`events: Array<PerceptionEvent & { eventScore: number }>` sorted desc — `contracts/index.ts:24`, the field M1 filled with a placeholder), and the digest reuses the **already-present** `HostDirective.action: 'digest'` member (`contracts/index.ts:30`). No new contract, no new HostDirective shape, no new seam, no cross-layer change (pure-FE; no backend, no new external dep). **So M4 is additive-on-existing-contracts → it can SKIP the architect** (per CLAUDE.md outer-loop step 2: "Skip for additive UI on existing contracts"). **One thing for the orchestrator to confirm at BUILD (not a seam decision):** whether the digest's `utterance` is voiced through the **same** live-voice/`speak` path the surfacing events use (recommended — reuse, so the digest is audibly the host) — a wiring choice inside the App, not a contract change. _(If the team finds it wants a NEW `HostDirective` field or a digest payload shape the contract can't carry, STOP and bring in the architect + an ADR — but the current contracts already carry both `eventScore` and a `digest` action, so this is not expected.)_
+  - **DoD:** `pnpm verify` = 0 (the ranker unit tests incl. the ordering proof; the App/rail integration onto the ranker; the digest cycles — produced-first, spoiler-safe, cost-gated-one; the host-loop unit tests + its 30s default UNCHANGED); **tdd-critic PASS** on the M4 cycles; **qa-verifier confirms on the running app** the DoD #1 experience (open → the host delivers the spoiler-safe catch-up digest in its voice → then live moments surface, ranked); **PO sign-off** vs this acceptance + the brief (DoD #1 met; two-level ranking real). Invariants proven on the digest path (spoiler-safe, cost-gated one) + re-asserted on the unchanged surfacing path.
+  - **Out of scope (defer — named so they aren't lost):** the **`/narrate` cost-gating + live-voice transport** stay UNCHANGED (the digest reuses them; don't reshape `host-loop.ts` / `narrating-host-loop.ts` / the live-voice path); **dynamic real-event sourcing / real heat** is **M5** (M4 ranks the **scripted** mock graph — the ranker is real, the events are still mocked per brief §7/§11); the **DYNAMIC-LIVE-FETCH** always-live channel fetch (below) and **KICK-VARIETY** (below) are separate; **LV1-D2** wake-latency (below) is separate (the digest may make the *first* line feel slow — note it, don't fix it here).
+  - **Invariants:** **spoiler-safety** (the digest emits narration → PROVE no-outcome-token + `spoilerSafe: true` on the digest directive, alongside the unchanged host-loop/rail spoiler tests), **cost-gating** (PROVE exactly one digest on load — zero before gesture, one after; the per-surface `/narrate`/live-voice gating unchanged), **silence budget** (the digest is the catch-up, not a new continuous speak — the loop's budget logic is untouched), **official-embeds-only** (re-asserted — ranking reorders events but renders the same first-party `embedUrl` verbatim + ADR 0008 `parent`; the digest touches no embed), **secrets-from-env** (untouched — pure FE; no key/credential path).
+  - **Depends on:** M0b contracts ✓ (the `RankedFeed`/`HostDirective` seam, incl. the `eventScore` field + `digest` action), M1 shell ✓ (rail consumes feed order), M2/M3 host loop + narrate ✓ (the digest reuses the speak/narrate path), WDC ✓ (the watchable cut + gesture-gating the digest fires after), WDC-D2 ✓ (the App tests are now **decoupled via `vi.mock` of the event-graph** — `App.test.tsx:14`, so M4's ranker/digest changes won't fight the timing-coupled App assertions; the fixture can be extended for ordering/digest cases). **Pure FE; no §6 contract change; no architect DESIGN.** UX-affecting → qa-verifier confirms the DoD #1 experience on green.
+
+### WDC-D2 · demo pacing — a lively, watchable host cadence (the host stays present, not asleep) — `[frontend]` — milestone: **navigator-prioritized (WDC liveliness follow-up, ahead of M4)** — priority: **DONE (navigator-accepted at the WDC staging watch-through, 2026-06-03)** — status: **✅ DONE / accepted (2026-06-03)**
+  - **✅ ACCEPTED (PO, 2026-06-03 — at the WDC sign-off boundary).** The navigator watched the deployed WDC staging cut and confirmed verbatim: **"staging looks ok, the pause is shorter."** That accepts the WDC-D2 pacing fix — the dead-air gap the navigator originally flagged ("a really long silence, then it spoke again") is gone; the host now narrates at a livelier cadence (~every ~15s). **DoD met:** the enriched 7-event graph (all heat 0.63–0.95, ~15s apart, varied types/channels) + the App-level `silenceBudgetMs: 12000` shipped, the App tests were decoupled via a `vi.mock` fixture (`App.test.tsx:14`) and `event-graph.test.ts` pins the enriched liveliness invariants (≥6 events, every heat ≥ 0.6, ≤25s gaps, no `EXAMPLE_`, `player.twitch.tv/?channel=` shape); `pnpm verify`=0 (frontend 39 / backend 16); the host-loop 30s default + its unit tests UNCHANGED; deployed to staging (dev-ops `78d189e`); navigator confirmed the livelier cadence on the running app. **Invariants HELD** (host-loop logic UNCHANGED — WDC-D2 only tuned demo data density + one App config + test fixtures): cost-gating bounded (no storm), spoiler-safety (rail `type · streamer`, `narrative` never rendered — ADR 0009), official-embeds-only (first-party `player.twitch.tv` verbatim + ADR 0008 `parent`), secrets-from-env (untouched). **Residual carried (NOT a blocker):** **LV1-D2** (~10s per-line live-voice latency) — the orchestrator offered to warm the WSS connection if the navigator wants it snappier; **not requested** at the watch-through. Kept on the backlog (see "Next" → LV1-D2). _(Original KICKOFF + root-cause analysis retained below for history.)_
+
+### WDC-D2 (history) · demo pacing KICKOFF — retained for the record
   - **KICKOFF: `design-notes.md` → WDC-D2** (full layer-tagged acceptance + the TDD-vs-data split). Filed from a navigator watch-through of the deployed WDC cut.
   - **Navigator feedback (verbatim, 2026-06-03 staging watch-through):** _"looks ok, vid plays an host speaks the 1st line, then a really long silence, then it spoke again."_ So the WDC experience **WORKS** (real video plays + the live Gemini host speaks) — the defect is that the **pacing is too sparse**: the host narrates ~twice, far apart, then goes quiet. For a *watchable* demo the host must stay active. This is a focused **liveliness fix**, NOT a redesign and NOT a new behavior — it tunes the demo's event density + the App's demo silence budget so fresh moments keep surfacing.
   - **Root cause (orchestrator code analysis, confirmed by PO in-tree):** the §11 demo mock (`frontend/src/mocks/event-graph.ts`) has only **3 events** at `ts` 1 / 45000 / 90000; only **2 clear** the `surfaceThreshold` 0.6 (event 3 is `heatDelta` 0.55), and the `host-loop` enforces a **30s `silenceBudgetMs`** (`host-loop.ts:14`, default) because `App.tsx:45` calls `createHostLoop()` with no opts. Net: the host speaks at ~12s and ~57s, then dead air. _(Compounding but SEPARATE: per-line wake latency ~12s — the `/narrate` round-trip + live-voice setup — that is the existing **LV1-D2**; noted as related, NOT this fix's target.)_
@@ -26,9 +49,10 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
   - **Invariants (re-ASSERTED, not re-proven from scratch — the host-loop logic is UNCHANGED, this only tunes data + one App config):** spoiler-safety (rail `type · streamer`, captions verbatim-safe, `narrative` never rendered — ADR 0009; the enriched narratives keep outcomes as data only), silence budget (still *enforced* — the host still earns each interruption; WDC-D2 lowers the **demo** budget to ~12s so ~15–20s events surface, the loop's own 30s default + tests untouched), cost-gating (still one `/narrate` + one live-voice session per surface; bounded over the window — assert NOT a storm), official-embeds-only (first-party `player.twitch.tv` verbatim + ADR 0008 `parent`), secrets-from-env (untouched — pure FE data/config).
   - **Depends on:** WDC ✓ (the watchable cut this enlivens — real channels already wired, gesture-gating in place). Pure FE; **no §6 contract change**, no architect DESIGN needed (additive data + one App config + test-decoupling on existing contracts). UX-affecting → qa-verifier / navigator confirms cadence on green.
 
-### WDC · "Watchable demo cut" — real Twitch streams + "Start watching" gesture + light UI polish + graceful embeds — `[frontend]` — milestone: **navigator-prioritized (post-LV1, ahead of M4)** — priority: **NOW (navigator's call — "quickest watchable cut first")** — status: **in-progress (KICKOFF written; bullet 1 data swap in progress — navigator sourcing ids)**
-  - **KICKOFF: `design-notes.md` → WDC** (full layer-tagged acceptance; replaces the shipped LV1 KICKOFF). _(A prior
-    WDC attempt hit a transient error before the KICKOFF was written — this is the retry, same scope.)_
+### WDC · "Watchable demo cut" — real Twitch streams + "Start watching" gesture + light UI polish + graceful embeds — `[frontend]` — milestone: **navigator-prioritized (post-LV1, ahead of M4)** — priority: **DONE (navigator-accepted on staging, 2026-06-03)** — status: **✅ DONE / accepted (2026-06-03)**
+  - **✅ ACCEPTED (PO, 2026-06-03).** The navigator watched the deployed WDC staging demo and confirmed verbatim: **"staging looks ok, the pause is shorter."** That accepts the Watchable Demo Cut end-to-end: **real video plays** (real 24/7 Twitch channels — rifftrax / 247jynxzi / caedrel247 / lirik_247, Kick→Twitch — `mocks/event-graph.ts`, no `EXAMPLE_*` survives), the **"Start watching" gesture** gates the feed/host + unblocks the AudioContext (kills the on-mount flood), the **product look** landed (dark theme, "Based" header+tagline, 16:9 player, host orb w/ glow + caption, styled channel cards w/ heat bars, CTA overlay — "not a dev tool"), the **"Based" title** (WDC-D1) is set, graceful embeds (real Twitch + no Kick = no crash), and — with the **WDC-D2 pacing fix** (folded in) — the host narrates at a livelier ~15s cadence ("the pause is shorter"). The orchestrator visually confirmed the product look + real RiffTrax LIVE video + clean console + the /narrate wake-path locally; the navigator confirmed the experience on staging. `pnpm verify`=0 (frontend 39 / backend 16); tdd-critic PASS on the WDC cycles; deployed to staging (dev-ops `22975c7` → WDC-D2 `78d189e`). **DoD #1–#4 met** (real video; host wakes/speaks/cuts; no app crash/flood; reads as a product with a face) **+ the engineering bar** (suite green, critic PASS, navigator confirmed). **Invariants HELD** (host loop / §6 seam UNCHANGED — WDC swapped data + added a gesture + presentation + a degrade guard): spoiler-safety (rail `type · streamer`, never `narrative` — ADR 0009), silence budget + cost-gating (unchanged loop, gated behind one click — can only reduce spend), **official-embeds-only** (first-party `player.twitch.tv` verbatim + ADR 0008 `parent`, no rehost), secrets-from-env (pure FE, untouched).
+  - **Sub-items folded into this accept:** **WDC-D1** (stale `<title>SaaS App` → `Based — your AI host for live discovery`) — **DONE** (shipped); **WDC-D2** (demo pacing — the dead-air fix) — **DONE / accepted** (see its own entry above + the navigator's "the pause is shorter"). **Residuals carried (NOT blockers):** **LV1-D2** (~10s per-line live-voice latency — warm-WSS offered, not requested; kept on the backlog under "Next"); **WDC-W1** (AudioContext-flood-gone) — **CLOSED** (it was a qa-tooling-blocked watch-item; the navigator watched live with no flood complaint, so it's moot — see "Closed at the WDC accept" below); **§13 audible/voice-identity** — the navigator did not flag the voice, so the current Gemini Live voice is **ACCEPTED for the demo** (see Decisions needed → Voice identity, now CLOSED).
+  - **KICKOFF: `design-notes.md` → WDC** (full layer-tagged acceptance) — retained below for history.
   - **Why now (navigator's read of the deployed app):** LV1 shipped a working engine + a real live Gemini voice, but
     the **deployed staging app reads as a dev scaffold** — FAKE `EXAMPLE_*` embeds show "offline"/404/crash, the UI
     is bare ("idle" + a player + an unstyled rail), and there's a console flood (most loudly `"AudioContext was not
@@ -210,26 +234,11 @@ the brief's Definition of Done (§12) and invariants (ADR 0003)._
 
 ## Next (prioritized)
 
-### M4 · Two-level ranking + "while you were gone" digest — `[frontend]` — milestone: **M4** — priority: **NEXT (immediately after WDC)** — status: **todo — UNBLOCKED (LV1 shipped; queued behind WDC)**
-  - **Why next (after WDC):** LV1 is shipped; the navigator inserted **WDC** ("quickest watchable cut") ahead of M4,
-    so M4 is now the **next milestone after WDC** and remains the **one unmet brief DoD** — **DoD #1** ("a useful
-    digest of what you missed loads on entry; the channel is never empty even at 4am"). M4 is pure-FE, no new
-    external dep — a clean next feature. **It includes the WDC-deferred "digest on load"** (WDC explicitly does NOT
-    add the digest). _(PO will write the M4 KICKOFF into `design-notes.md` when the orchestrator opens M4;
-    DESIGN: additive-on-existing-contracts ranking + a digest directive — confirm with the architect whether the
-    digest needs any §6 shape change or fits the existing `HostDirective`/`RankedFeed`.)_
-  - **Goal:** event rank → `RankedFeed` desc; vantage rank picks best lens; **digest on load** (DoD #1 — the
-    channel is never empty even at 4am; brief §5/§9 M4).
-  - **Acceptance (sketch — finalize at the M4 KICKOFF):** events sorted by `eventScore` desc; best `lensScore`
-    chosen; a **digest directive produced FIRST on load** (before any timeline event); ≥2 events fire over the
-    timeline. **On any path that emits a `HostDirective`/narration (incl. the digest), re-assert the Based
-    invariants** — the digest line must be **spoiler-safe** (anticipation-only, no leaked outcome, every directive
-    `spoilerSafe: true`), within the **silence budget**, and **cost-gated** (no storm on load).
-  - **Carry-forward risks to TEST HERE (per `progress.md`):** `HostDirective.staging.fireAtMs` (ms) vs
-    `Vantage.offsetSec` (sec) off-by-1000 trap — convert explicitly + test; `RankedFeed.events` "sorted desc by
-    `eventScore`" is a doc-comment the ranker must **PROVE** with an ordering test (M1 used a placeholder
-    `eventScore = heatDelta`).
-  - **Depends on:** M0b contracts ✓, M1 shell ✓. UX-affecting → qa-verifier on green.
+### M4 · Two-level ranking + "while you were gone" digest — **MOVED TO "Now (in flight)"** (the canonical M4 entry + KICKOFF pointer are at the TOP of this file; design in `design-notes.md` → M4)
+  - M4 is the in-flight feature as of the WDC accept (2026-06-03). The full prioritized entry — acceptance pointer,
+    first RED (the ranker ordering proof), watch-outs, the **architect-not-needed** verdict (additive on existing
+    `RankedFeed`/`HostDirective` contracts), and the invariants — lives at the **top of this file** under "Now (in
+    flight)". This stub is left so a reader scanning "Next" finds the trail; it is no longer the canonical entry.
 
 ### DYNAMIC-LIVE-FETCH · always-live channels via a platform "currently-live" query — `[frontend|backend]` — milestone: **post-WDC robustness** — priority: **medium (the robust fix behind WDC's static-id expedient)** — status: **todo — DEFERRED from WDC (filed at the WDC KICKOFF)**
   - **Why:** WDC swaps in **static research-confirmed 24/7 Twitch ids** so the demo is watchable now — but a static id
@@ -432,15 +441,14 @@ will not pick these ahead of LV1 unless the navigator re-prioritizes for a demo 
     "reads as a product, not a dev tool" intent (design-notes WDC #3). _Repro:_ `curl -s https://d253xma588uo3l.cloudfront.net/`
     → `<title>SaaS App</title>`; or open the URL and read the tab title. _Fix:_ set `<title>Based</title>` in
     `frontend/index.html`. Not accept-blocking.
-  - **WDC-W1 (watch-item, not a defect) — AudioContext-flood-gone is unconfirmed-by-qa (browser bridge down).**
-    The gesture-gating fix is present in the shipped build (`App.tsx`: feed only starts when `started` flips true
-    via the "▶ Start watching" click; nothing runs on mount), and the live `AudioContext` is created lazily on the
-    first post-gesture `speak()`. By Chromium's sticky-activation autoplay policy this *should* eliminate the
-    "AudioContext was not allowed to start" flood — but qa could **not** drive the live browser console this run
-    (both Chrome MCP bridges were unavailable). The console-clean confirmation (and the host-wake / live-caption /
-    real-video / surf experience checks) remain to be eyeballed by the navigator at the demo watch-through. _Note:_
-    the AudioContext is first touched on the first surfacing `speak()` (a feed-timer event a few seconds after the
-    click), not synchronously inside the onClick handler — worth a glance that the sticky activation holds.
+  - **WDC-W1 (watch-item) — AudioContext-flood-gone — ✅ CLOSED (2026-06-03, at the WDC accept).** _Was a
+    qa-tooling-blocked watch-item, not a defect._ The gesture-gating fix is present in the shipped build (`App.tsx`:
+    feed only starts when `started` flips true via the "▶ Start watching" click; the live `AudioContext` is created
+    lazily on the first post-gesture `speak()`). qa could not drive the live console (both Chrome MCP bridges were
+    down), so it was filed as a watch-item for the navigator's eye. **Now moot:** the navigator watched the deployed
+    cut live ("staging looks ok, the pause is shorter") and **raised no console/flood complaint** — and the
+    orchestrator had already confirmed a clean console locally via Preview MCP. The flood is gone in practice;
+    nothing left to watch. **CLOSED.**
 - **E2E · One DoD journey** — `[e2e]` — status: todo
   - Goal: Playwright journey covering brief §12 end to end (load→digest→events→cut→surf,
     no spoiler). Enable `webServer` in `e2e/playwright.config.ts`. Keep e2e count ≤2.
@@ -539,11 +547,16 @@ below; the pivot does NOT affect this residual — same audio pipeline). **M3 is
 RESOLVED** (rail hedged via SPOILER-HARDENING; ADR 0009 — now DEPLOYED per `progress.md`). **One §13 wording call
 remains OPEN but non-blocking — tier-aware hedging** — needed only **before a generated line is shown externally**
 (shapes wording, not a seam). **The LV1-relay-host infra escalation is CLOSED/MOOT** (no relay under (a) — see the
-struck entry below). **One escalation remains for the LV1 RELEASE/demo:** the audible/voice confirmation above.
-**Persona / rights** stay settled-for-now on the M2 defaults (re-attach at the first external demo). **Release
-note:** the embed/spoiler staging fixes are now DEPLOYED (CI `GEMINI_MODEL`→SSM gap CLOSED on `ce194e7`) — so
-model-id-changing releases (incl. LV1's `gemini-3.1-flash-live-preview`) are CI-safe; **the LV1 staging release is
-now a plain App-Runner-mint + S3/CloudFront-FE deploy** (NO relay, NO ECS)._
+struck entry below). **WDC update (2026-06-03): the §13 AUDIBLE / voice-identity call is now CLOSED — ACCEPTED for
+the demo** (the navigator watched the deployed WDC cut, "staging looks ok, the pause is shorter", and did not flag
+the voice → the current Gemini Live voice is accepted; see "Voice identity" below). **So NO §13 escalation is
+currently open as a blocker.** The **only** open §13 item is **tier-aware hedging** (non-blocking; needed only
+before a generated line is shown externally) — it does NOT block **M4** (M4 narrates the digest + surfacing lines
+on the existing default prompt/hedging; the wording is a future external-demo polish). **Persona / rights** stay
+settled-for-now on the M2 defaults (re-attach at the first external demo). **Release note:** the embed/spoiler
+staging fixes are now DEPLOYED (CI `GEMINI_MODEL`→SSM gap CLOSED on `ce194e7`) — so model-id-changing releases
+are CI-safe; **the LV1 staging release is a plain App-Runner-mint + S3/CloudFront-FE deploy** (NO relay, NO ECS).
+**M4 (the in-flight feature) introduces NO new §13 escalation** — it rides on all settled-for-now defaults._
 
 - **LV1 relay host — infra-scope: where does the WSS relay run?** **✅ CLOSED / MOOT (2026-06-03, ADR 0007
   Amendment C).** ~~OPEN · escalated 2026-06-02 · release-gate.~~ **No longer applicable — there is no relay.** The
@@ -574,19 +587,17 @@ now a plain App-Runner-mint + S3/CloudFront-FE deploy** (NO relay, NO ECS)._
   merch/clip engine — brief §13). **SETTLED-FOR-NOW:** M2 shipped a single `idle`/`speaking` character
   on the one-host default; carries no rework risk into M3. **Re-attaches at:** the first external demo
   (final name/look). [pending — external-demo gate]
-- **Voice identity / audible confirmation — does the Gemini Live voice SOUND right?** **⏳ ACTIVE — the LV1
-  accept condition; needs the navigator's EAR (escalated 2026-06-03).** The **engine is resolved** (navigator
-  chose `gemini-3.1-flash-live-preview` streamed audio over Web Speech, 2026-06-02; LV1 is built + conditionally
-  accepted). But LV1's **one qa-only bullet that no agent can close** is whether the streamed voice is **AUDIBLY**
-  right: qa proved the **pipeline executes** end-to-end (37 PCM frames → `audio.play()` → 24 kHz AudioContext →
-  `speak()` resolves on drain → WS closes) and the line is spoiler-safe, but whether it **sounds**
-  audible / intelligible / like the host we want is a **human-ear judgment**. _PO recommendation / default:_
-  **accept the current default Live voice for the prototype demo as-is** (the pipeline is proven; the line is
-  spoiler-safe and matches on screen) — the specific voice/persona-audio config is a low-risk **tuning knob**,
-  not a seam, so it can be adjusted without reshaping anything if the navigator dislikes it. **Action for the
-  navigator:** at demo, listen — if the voice is inaudible/wrong, file an LV1 voice-config defect (output-audio /
-  voice-selection tuning); otherwise this §13 call closes. **Needed by:** the LV1 demo. [ACTIVE — navigator's ear
-  at demo; recommended default above]
+- **Voice identity / audible confirmation — does the Gemini Live voice SOUND right?** **✅ CLOSED / ACCEPTED for
+  the demo (2026-06-03, at the WDC accept).** The **engine** was resolved earlier (navigator chose
+  `gemini-3.1-flash-live-preview` streamed audio over Web Speech, 2026-06-02). The remaining call — whether the
+  streamed voice is **AUDIBLY** right (a human-ear judgment qa could prove only as a working pipeline) — was the
+  navigator's at demo. **The navigator watched the deployed WDC cut live ("staging looks ok, the pause is shorter")
+  and did NOT flag the voice.** Per the PO's recommended default (accept the current Live voice as-is for the
+  prototype demo — the pipeline is proven, the line is spoiler-safe and matches on screen), **the current Gemini
+  Live voice is ACCEPTED for the demo.** This §13 call is **CLOSED.** _(Re-attaches only at a later "pick a final
+  TTS voice direction before any external/marketing demo" gate — a future, separate decision; the
+  voice/persona-audio config remains a low-risk tuning knob, not a seam, if a future re-voice is wanted.)_ [CLOSED
+  — navigator accepted at the WDC demo]
 - **Rights/ToS:** official embeds only; never rehost/restream; route value to the source.
   **SETTLED-FOR-NOW:** invariant carries through M2 (cuts render `embedUrl` verbatim) and is unchanged
   by M3 (`/narrate` never touches embeds). The §11 mock's `EXAMPLE_*` placeholders keep proving the

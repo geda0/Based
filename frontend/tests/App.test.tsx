@@ -12,8 +12,7 @@ import { App } from "../src/App.js";
 // the fixture is defined INLINE inside the factory — it cannot reference outer
 // variables. Both <App/> and the tests now derive from this single fixture.
 vi.mock("../src/mocks/event-graph", () => {
-  const digest =
-    "Quiet night so far — a Valorant major semifinal just went live, a speedrunner is one trick from a world record, and there's slow-building drama in a Just Chatting stream.";
+  const digest = "";
 
   const events = [
     {
