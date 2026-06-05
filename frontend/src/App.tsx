@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HostDirective, PerceptionEvent } from './contracts';
 import { events as mockEvents, digest } from './mocks/event-graph';
 import { type SourceRegistry } from './lib/sources';
@@ -41,6 +41,8 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator; re
   const voice = props?.voice ?? (import.meta.env.VITE_LIVE_VOICE ? liveVoice : defaultVoice);
   const registry = props?.registry;
 
+  const voicingRef = useRef(false);
+
   const [events, setEvents] = useState<PerceptionEvent[]>(registry ? [] : mockEvents);
   useEffect(() => {
     if (!registry) return;
@@ -55,15 +57,29 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator; re
     const bus = createEventBus<PerceptionEvent>();
     const loop = createHostLoop({ silenceBudgetMs: 12000 });
     const nloop = createNarratingHostLoop(loop, narrate);
+
+    // pendingSpeak: the last event speak that arrived while the digest was in flight.
+    // Depth-1 queue: last-one-wins (only the most recent pending event matters).
+    let pendingSpeak: { d: HostDirective; text: string } | null = null;
+
+    const voiceEvent = (d: HostDirective, text: string) => {
+      setSpeakDirective(d);
+      const revertIfCurrent = () =>
+        setSpeakDirective((cur) => (cur === d ? { action: "idle", spoilerSafe: true } : cur));
+      void voice.speak(text).then(revertIfCurrent, revertIfCurrent);
+    };
+
     const unsubscribe = bus.subscribe((event) => {
       void (async () => {
         const directives = await nloop.onEvent({ ...event, eventScore: computeEventScore(event) });
         for (const d of directives) {
           if (d.action === 'speak') {
-            setSpeakDirective(d);
-            const revertIfCurrent = () =>
-              setSpeakDirective((cur) => (cur === d ? { action: "idle", spoilerSafe: true } : cur));
-            void voice.speak(d.utterance ?? "").then(revertIfCurrent, revertIfCurrent);
+            if (voicingRef.current) {
+              // Digest is in flight — save this event speak for after digest finishes.
+              pendingSpeak = { d, text: d.utterance ?? "" };
+            } else {
+              voiceEvent(d, d.utterance ?? "");
+            }
           } else if (d.action === 'cutTo') setCutDirective(d);
         }
       })();
@@ -72,10 +88,21 @@ export function App(props?: { narrate?: NarrateClient; voice?: VoiceNarrator; re
     if (started) {
       if (digest) {
         const d: HostDirective = { action: 'digest', utterance: digest, spoilerSafe: true };
+        voicingRef.current = true;
         setSpeakDirective(d);
         const revertIfCurrent = () =>
           setSpeakDirective((cur) => (cur === d ? { action: 'idle', spoilerSafe: true } : cur));
-        void voice.speak(digest).then(revertIfCurrent, revertIfCurrent);
+        void voice.speak(digest)
+          .then(revertIfCurrent, revertIfCurrent)
+          .finally(() => {
+            voicingRef.current = false;
+            // Drain the pending queue: voice the last event that arrived during the digest.
+            if (pendingSpeak) {
+              const p = pendingSpeak;
+              pendingSpeak = null;
+              voiceEvent(p.d, p.text);
+            }
+          });
       }
       sourceFeed.start();
     }
