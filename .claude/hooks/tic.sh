@@ -6,7 +6,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck disable=SC1091
-. "$ROOT/.claude/hooks/lib.sh"
+. "$ROOT/.claude/hooks/tics-lib.sh"
 case "${3:-}" in
   delegate|handoff|signal|block|verdict|msg|note|claim|release|contract|need|commit)
     emit_tic "$@" ;;
