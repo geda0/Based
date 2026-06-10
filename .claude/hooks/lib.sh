@@ -19,8 +19,12 @@ _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 : "${TAIL_LINES:=40}"
 : "${TELEMETRY:=1}"
 : "${CLAIMS_ENFORCE:=1}"
+: "${RED_STREAK_LIMIT:=5}"
+: "${MULTI_SESSION:=0}"
 : "${SESSION_BASELINE_CHECK:=1}"
 : "${BASELINE_CMD:=$ALL_TEST_CMD}"
+: "${TEAM_ACCOUNTABILITY:=1}"
+: "${SOLO_DRIFT_CYCLES:=3}"
 
 # 4) Resolver (bash 3.2 safe).
 resolve_layer() {
